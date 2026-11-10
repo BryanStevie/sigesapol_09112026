@@ -1,0 +1,51 @@
+.modal-edit-rv-label {
+  font-size: 10px;
+}
+
+#mervTablePrescripcion {
+  table-layout: fixed;
+  width: 100%;
+}
+
+#mervTableDiagnosticos thead {
+  font-size: 11px;
+  font-weight: bold;
+}
+
+#mervTablePrescripcion thead {
+  font-size: 11px;
+  font-weight: bold;
+}
+
+.input-readonly {
+  background-color: #E0E0E0 !important;
+}
+
+.table-error {
+  border: 1px solid #dc3545;
+  background-color: #fee2e2;
+}
+
+.label-help {
+  color: #dc3545; 
+  font-size: 11px; 
+  font-weight: bold
+}
+
+.swal2-icon.swal2-warning {
+  font-size: 12px !important; 
+}
+
+.ui-autocomplete {
+  z-index: 1055 !important;
+}
+
+.select2-container--disabled .select2-selection {
+  background-color: #E0E0E0 !important;
+  cursor: not-allowed;
+}
+
+#modalEditRecetaVale .modal-body {
+  overflow-y: auto;
+  max-height: calc(100vh - 200px);
+}

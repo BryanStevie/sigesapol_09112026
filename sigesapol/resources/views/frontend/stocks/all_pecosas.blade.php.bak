@@ -1,0 +1,361 @@
+@extends('frontend.layouts.master')
+@section('renderjs')
+
+<style>
+    .row{
+        margin-top:10px;
+        padding: 0 10px;
+    }
+    .clickable{
+        cursor: pointer;   
+    }
+
+    .panel-heading-1 div {
+        margin-top: -18px;
+        font-size: 15px;
+    }
+    .panel-heading-1 div span{
+        margin-left:5px;
+    }
+    /*.panel-body{
+        display: none;
+    }*/
+    .table{
+        font-size: 12px
+    }
+
+</style>
+
+<script>
+    function soloNumeros(e)
+        {
+            var key = window.Event ? e.which : e.keyCode;
+            //alert(key);
+            return ((key >= 48 && key <= 57) || key == 0 || key == 8)// || key == 45)
+        }
+        
+    /*
+     Please consider that the JS part isn't production ready at all, I just code it to show the concept of merging filters and titles together !
+     */
+    $(document).ready(function () {
+        $("#id_requerimiento").select2({
+            width: 'resolve' // need to override the changed default
+        });
+        
+        $('#fecha_entrada').click(function () {
+            var fechaVencimientoIni = $('#fecha_entrada').val();
+            $('#fecha_entrada').change(function () {
+                var fechaVencimiento = $('#fecha_entrada').val();
+                f1 = fechaVencimiento.split("-");
+                f3 = new Date();
+                var f1 = new Date(parseInt(f1[2]), parseInt(f1[1] - 1), parseInt(f1[0], 0, 0,59));
+                
+                if (f1 > f3) {
+                    bootbox.alert("La Fecha de Pecosa no debe ser mayor a la Fecha Actual");
+                    
+                    $('#fecha_entrada').val(fechaVencimientoIni);
+                    return false;
+                }
+            });
+        });
+        $('#fecha_entrada').trigger('change');
+        
+    });
+    
+    $("#btnReg").on("click", function () {
+        var hoy = new Date();
+        var dd = hoy.getDate();
+        var mm = hoy.getMonth()+1; //hoy es 0!
+        var yyyy = hoy.getFullYear();   
+        if(dd<10) {
+            dd='0'+dd
+        } 
+        if(mm<10) {
+            mm='0'+mm
+        }
+        hoy = dd+'-'+mm+'-'+yyyy;        
+        fecha_entrada=$('#frmPecosa').find("#fecha_entrada").val();                        
+        var xMonth=fecha_entrada.substring(3, 5);                 
+        var xDay=fecha_entrada.substring(0, 2);  
+        var xYear=fecha_entrada.substring(6,10);  
+        var yMonth=hoy.substring(3, 5);          
+        var yDay=hoy.substring(0, 2);  
+        var yYear=hoy.substring(6,10);         
+        if (xYear> yYear) {  
+                alert("La fecha solo puede estar comprendida entre hoy y 30 días atrás");
+                return false; 
+            }
+        else{
+            if (xYear == yYear){
+                if (xMonth> yMonth){
+                    alert("La fecha solo puede estar comprendida entre hoy y 30 días atrás");
+                    return false;  
+                }
+                else{
+                    if (xMonth == yMonth){
+                        if (xDay> yDay){
+                            alert("La fecha solo puede estar comprendida entre hoy y 30 días atrás");
+                            return false;
+                        }
+                    }
+                }
+            }
+        }
+			
+            if ($('#frmPecosa').find("#id_requerimiento").val() == 0 || $('#frmPecosa').find("#id_requerimiento").val() == "") {
+                alert("Falta Seleccionar el requerimiento");
+                return false;
+            }
+
+            if ($('#frmPecosa').find("#numero").val() == "") {
+                alert("Falta digitar el número de pecosa");
+                return false;
+            }
+			
+            if ($('#frmPecosa').find("#fecha_entrada").val() == "") {
+                alert("Falta Seleccionar la Fecha");
+                return false;
+            } 
+
+
+    });
+
+    function select_tipoing() {
+            $("#id_requerimiento").val('');
+            $('#id_requerimiento').trigger('change');
+            $("#numero").val('');
+            $("#fecha_entrada").val('');
+        
+        if ($("#id_origen").val() == "") {
+            $('#id_requerimiento').attr('disabled', true);
+            $('#numero').attr('disabled', true);
+            $('#ano').attr('disabled', true);
+            $('#fecha_entrada').attr('disabled', true);
+        } else {
+            $('#id_requerimiento').attr('disabled', false);
+            $('#numero').attr('disabled', false);
+            $('#ano').attr('disabled', false);
+            $('#fecha_entrada').attr('disabled', false);
+            getRequerimiento();
+        }
+    }
+    
+    function getRequerimiento() {
+
+        var id_origen = $('#id_origen').val();
+        $.ajax({
+            url: '/obtener_nroreque_por_id_origen/' + id_origen,
+            success: function (result) {
+                var newOption = "";
+                newOption = "<option value='0'>--Seleccione-</option>";
+                $(result).each(function (ii, oo) {
+                    newOption += "<option value='" + oo.id_reque + "'>" + oo.nro_reque + "-" + oo.anio_reque +"</option>";
+                });
+                $('#id_requerimiento').html(newOption);
+                $("#id_requerimiento").select2({max_selected_options: 4});
+                $('#id_requerimiento').attr('disabled', false);
+                $('#id_requerimiento').attr('required', true);
+
+            }
+        });
+
+    }
+    
+    (function () {
+        'use strict';
+        var $ = jQuery;
+        $.fn.extend({
+            filterTable: function () {
+                return this.each(function () {
+                    $(this).on('keyup', function (e) {
+                        $('.filterTable_no_results').remove();
+                        var $this = $(this),
+                                search = $this.val().toLowerCase(),
+                                target = $this.attr('data-filters'),
+                                $target = $(target),
+                                $rows = $target.find('tbody tr');
+
+                        if (search == '') {
+                            $rows.show();
+                        } else {
+                            $rows.each(function () {
+                                var $this = $(this);
+                                $this.text().toLowerCase().indexOf(search) === -1 ? $this.hide() : $this.show();
+                            })
+                            if ($target.find('tbody tr:visible').size() === 0) {
+                                var col_count = $target.find('tr').first().find('td').size();
+                                var no_results = $('<tr class="filterTable_no_results"><td colspan="' + col_count + '">No hay resultados</td></tr>')
+                                $target.find('tbody').append(no_results);
+                            }
+                        }
+                    });
+                });
+            }
+        });
+        $('[data-action="filter"]').filterTable();
+    })(jQuery);
+
+</script>
+@endsection
+@section('content')
+<div class="container-fluid">
+    <form class="form-horizontal" method="post" action="{{ route('add_pecosa')}}" id="frmPecosa">
+        <input type="hidden" name="_token" value="{{ csrf_token() }}"/>
+        <div class="panel panel-primary">
+            <div class="panel-heading">
+                <h3 class="panel-title">
+                    INGRESOS DESDE ALMACEN
+                </h3>
+            </div>
+            <div class="panel-body">
+                <div class="row">
+                <div class="col-sm-2">
+                    <label>Lugar de Origen</label>
+                    <select name="id_origen" id="id_origen" class="form-control input-sm" required="" onchange="select_tipoing()">
+                        <option value="" selected="">-Seleccione-</option>
+                        <?php
+                        foreach ($destino as $d) {
+                            ?>
+                            <option value="<?php echo $d->id_farmacia ?>"><?php echo $d->nombre; ?></option>
+                            <?php
+                        }
+                        ?>
+                    </select>
+                </div>
+                <div class="col-sm-2">
+                    <label>Requerimiento</label>
+                    <select class="form-control" id="id_requerimiento" name="id_requerimiento" disabled="" style="width: 100%">
+                        <option value="" selected="">- Seleccione -</option> 
+                        @foreach($requerimientopen as $pf)
+                        <option value="{{$pf->id_reque}}">{{$pf->nro_reque}}-{{$pf->anio_reque}}</option>
+                        @endforeach
+                    </select>
+                </div>
+                <div class="col-sm-4 col-md-3">
+                    <label>Nro. Pecosa</label>
+                    <input id="numero" name="numero" type="text" placeholder="Nro. Pecosa" class="form-control input-sm" onKeyPress="return soloNumeros(event)" autocomplete="off" maxlength="9" disabled=""/>
+                </div>
+                <div class="col-sm-2">
+                    <label>A&ntilde;o</label>
+                    <select class="form-control input-sm" id="ano" name="ano" disabled="">
+                        @foreach($anos as $a)
+                        <option value="{{$a->ano}}">{{$a->ano}}</option>
+                        @endforeach
+                    </select>
+                </div>
+                <div class="col-sm-2">
+                    <label>Fecha</label>
+                    <input id="fecha_entrada" name="fecha_entrada" type="text" placeholder="Fecha" class="form-control input-sm datepicker" disabled=""  data-date-end-date="0d" autocomplete="Off"/>
+                    <input hidden="" name="id_farmacia" value="{{ Auth::user()->id_farmacia}}"/>
+                    <input hidden="" name="id_user" value="{{ Auth::user()->id}}"/>
+                </div>
+                <div class="col-sm-12 col-md-11" style="padding-top: 15px;">
+                    @if($count>0)
+                    <span style="font-size: 11px"><i class="fa fa-warning" style="color:red"></i> No se puede ingresar productos, tienes ingreso(s) pendiente(s).</span>
+                    @else
+                    <?php if ($permiso->crear == 1 || $permiso->modificar == 1): ?>
+                        <input type="submit" class="btn btn-success pull-right" value="Recepcionar Pecosa" id="btnReg"/>
+                    <?php endif; ?>
+                    @endif
+                </div>
+            </div>
+                <br/>
+            <div class="panel panel-info panel-1">
+                <div class="panel-heading panel-heading-1">
+                    <h3 class="panel-title">Lista de Ingresos</h3>
+                </div>
+                <div class="panel-body">
+                        <div class="open-sheard">
+                            <input type="text" class="form-control" id="dev-table-filter" data-action="filter" data-filters="#dev-table" placeholder="Filtrar" />
+                        </div>
+                    <div class="table-responsive">
+                        <table class="table table-hover" id="dev-table">
+                            <thead>
+                                <tr>
+                                    <th>Item</th>
+                                    <th>Nro. Requerimiento</th>
+                                    <th>Nro. Pecosa</th>
+                                    <th>Nota Entrada</th>
+                                    <th>Lugar de Origen</th>
+                                    <th>Lugar de Destino</th>
+                                    <th>Fecha</th>
+                                    <th>Recepcionar</th>
+                                    <!--<th>Editar</th>-->
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <?php $n = 0; ?>
+                                @foreach($pecosas as $p)
+                                <tr>
+                                    <td class="text-center"><?php $n = $n + 1;
+                                echo $n;
+                                ?></td>
+                                    <td class="text-center">{{$p->nro_reque}}-{{$p->anio_reque}}</td>
+                                    <td class="text-center">{{$p->numero}}-{{$p->ano_nota}}</td>
+                                    <td class="text-center">{{$p->nota_entrada}}</td>
+                                    <td><?php
+                                        if ($p->nom_origen == "") {
+                                            echo "Almacen Central del SALUDPOL";
+                                        } else {
+                                            echo $p->nom_origen;
+                                        }
+                                        ?></td>
+                                    <td>{{$farmacia->nombre}}</td>
+                                    <td>
+                                        <?php
+                                        $originalDate2 = $p->fecha_entrada;
+                                        $newDate2 = date("d-m-Y", strtotime($originalDate2));
+                                        echo $newDate2;
+                                        ?> 
+                                    </td>
+                                    @if($p->fecha_entrada>'2016-12-20')
+                                    @if($p->estado==1)
+                                    <td class="text-center">
+                                        <?php if ($permiso->crear == 1 || $permiso->modificar == 1): ?>
+                                            <a class="btn btn-success btn-xs"  href="/recepcionar_productos_pecosa/{{$p->id}}/{{ Auth::user()->id}}">
+                                                <i class="glyphicon glyphicon-list-alt"></i> Por recepcionar
+                                            </a>
+                                            <?php if ($permiso->eliminar == 1): ?>
+                                                <a class="btn btn-danger btn-xs"  href="/eliminar_pecosa/{{$p->id}}/{{ Auth::user()->id_farmacia}}">
+                                                    <i class="fa fa-warning"></i> Eliminar
+                                                </a>
+                                        <?php endif;
+                                    endif;
+                                    ?>
+                                    </td>
+                                    <!--<td class="text-center">
+                                    <?php if ($permiso->crear == 1 && $permiso->modificar == 1): ?>
+                                                <button type="button" class="btn btn-success btn-sm" disabled=""><i class="fa fa-edit"></i></button>
+<?php else: ?>
+                                                    <button type="button" class="btn btn-success btn-sm" disabled=""><i class="fa fa-edit"></i></button>
+<?php endif; ?>
+                                    </td>-->
+                                    @else
+                                    <td class="text-center">
+                                        <a class="btn btn-default btn-xs"  href="/recepcionar_productos_pecosa/{{$p->id}}/{{ Auth::user()->id}}">
+                                            <i class="fa fa-check"></i> Detalle
+                                        </a>                                        
+                                    </td>                                        
+                                    <!--<td class="text-center">
+                                        <button type="button" class="btn btn-success btn-sm" disabled=""><i class="fa fa-edit"></i></button>
+                                    </td>-->
+                                    @endif
+                                    @else
+                                    <td>
+                                        <a class="btn btn-default btn-xs"  href="/pecosa_anterior_kardex/{{$p->numero}}/{{ Auth::user()->id_farmacia}}/{{$p->fecha_entrada}}">
+                                            <i class="fa fa-check"></i> Detalle
+                                        </a>
+                                    </td>
+                                    @endif
+                                </tr>
+                                @endforeach
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </form>
+</div>
+@include('frontend.includes.footer')
+@endsection

@@ -1,0 +1,107 @@
+label {
+  font-size: 11px;
+}
+
+.row {
+  /* gap: 10px; */
+}
+
+.separate-addon {
+  background-color: #ffffff !important;
+  border: none !important;
+}
+
+.table-error {
+  border: 1px solid #dc3545;
+}
+
+.label-help {
+  color: #dc3545; 
+  font-size: 11px; 
+  font-weight: bold
+}
+
+.label-help-success {
+  color: #28a745; 
+  font-size: 11px; 
+  font-weight: bold
+}
+
+.label-antecedentes { 
+  color: #060606; 
+  font-size: 12px;
+  font-weight: bold
+}
+
+.antecedentes-content { 
+  color: #060606; 
+  font-size: 11px;
+  font-weight: 100
+}
+
+.container-detail {
+  margin-top: 23px;
+  display: flex;
+  align-items: center;
+  padding: 0px 20px 0px 20px;
+}
+
+.label_nro_examenes {
+  font-weight: 800;
+  font-size: 12px;
+}
+
+.container-buttons {
+  display: flex;
+  flex-direction: row;
+  justify-content: center;
+  column-gap: 30px;
+  margin-top: 20px;
+}
+
+.button {
+  width: 35rem;
+}
+
+.file_result {
+  font-size: 11px;
+  font-weight: 700;
+  color: #060606;
+}
+
+#tbListDetalle th,
+#tbListDetalle td {
+  vertical-align: middle !important;
+}
+
+.file-updated {
+  position: relative;               /* clave para posicionar el botón */
+  border: 1px solid #acacac; 
+  border-radius: 3px;
+  width: 30px;
+  height: 30px;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  cursor: pointer;
+}
+
+.btn-remove-file {
+  position: absolute;
+  top: -5px;   /* lo saco un poco fuera para que no tape el ícono */
+  right: -5px;
+  background: #dc3545;
+  border: none;
+  color: white;
+  border-radius: 50%;
+  width: 15px;
+  height: 15px;
+  font-size: 10px;
+  line-height: 15px;
+  padding: 0;
+  cursor: pointer;
+}
+
+.btn-remove-file:hover {
+  background: #c82333;
+}

@@ -1,0 +1,159 @@
+@extends('frontend.layouts.master')
+@section('renderjs')
+<script>
+    function justNumbers(e)
+    {
+        var keynum = window.event ? window.event.keyCode : e.which;
+        if ((keynum == 8))
+            return true;
+        return /\d/.test(String.fromCharCode(keynum));
+    }
+    
+    function validateFrm() {
+        var msg = "";
+        var sw = true;
+        var cantidad_actual = $('#cantidad_actual').val();
+        var presentacion_comercial = $('#presentacion_comercial').val();
+        var cantidad_transferir = $('#cantidad').val();
+
+        if (cantidad_transferir == "") {
+            msg += "Ingrese cantidad a transferir.<br/>";
+            sw = false
+        }
+        
+        if (cantidad_transferir == "0") {
+            msg += "Ingrese cantidad a transferir mayor a 0.<br/>";
+            sw = false
+        }
+        
+        if (esEntero(cantidad_transferir) == false) {
+            msg += "La cantidad a transferir debe ser un número entero.<br/>";
+            sw = false
+        }
+        
+        if (parseInt(cantidad_actual) < parseInt(cantidad_transferir*presentacion_comercial)) {
+            msg += "La cantidad a transferir debe ser menor o igual a la cantidad actual.<br/>";
+            sw = false
+        }        
+
+        if (sw == false) {
+            bootbox.alert(msg);
+            return sw;
+        } else {
+            submitFrm();
+        }
+        return false;
+    }
+    function submitFrm() {
+        bootbox.confirm({
+            message: "Se registrarán los registros ingresados, ¿Está seguro de continuar?",
+            buttons: {
+                confirm: {
+                    label: 'Si',
+                    className: 'btn-success'
+                },
+                cancel: {
+                    label: 'No',
+                    className: 'btn-danger'
+                }
+            },
+            callback: function (result) {
+                if (result == true) {
+                    document.frm_transferencia.submit();
+                }
+            }
+        });
+    }
+    
+    
+    
+</script>
+<style>
+    .etiqueta{margin-top: 5px}
+    .panel_medicamentos{border: 1px solid gray; padding-top: 10px}
+</style>
+@endsection
+@section('content')
+<div class="container">
+    <div class="row">
+            <div class="panel panel-primary">
+                <div class="panel-heading">
+                    <h4 class="panel-title">Editar Producto Seleccionado</h4>   
+                    <a class="pull-right btn btn-info btn-md" href="/registrar_productos_transferir/{{$transferencia_productos->id_transferencia}}/{{ Auth::user()->id_farmacia }}">
+                        <i class="fa fa-arrow-left"></i> Regresar
+                    </a>
+                </div>
+                <div class="panel-body">
+                    <form name="frm_transferencia" id="frm_transferencia" method="POST" action="{{ route('update_producto_transferencia')}}" onsubmit="return validateFrm();">
+                        <input type="hidden" name="_token" value="{{ csrf_token() }}">   
+                        <div class="col-md-3">
+                            <label>Codigo</label>
+                            <input value="{{$producto->codigo}}" name="codigo" type="text" readonly="" class="form-control">
+                            <input name="id_transferencia_producto" value="{{$transferencia_productos->id}}" type="hidden">
+                            <input name="id_transferencia" value="{{$transferencia_productos->id_transferencia}}" type="hidden">
+                             <input name="id_farmacia" value="{{ Auth::user()->id_farmacia }}" type="hidden">
+                             <input name="id_producto" value="{{ $producto->id}}" type="hidden">
+                        </div>
+                        <div class="col-md-7">
+                            <label>Producto</label>
+                            <input value="{{$producto->nombre}} <?php if($producto->presentacion == 1) 
+                                echo ' ( '.$lote->cantidad2.' X '.$lote->presentacion_comercial.' )';
+
+                            ?>" name="nombre_producto" type="text" readonly="" class="form-control">
+                        </div>
+                        <div class="col-md-2">
+                            <label>Unidad</label>
+                            <input value="{{$producto->abreviatura}}" name="unidad" type="text" readonly="" class="form-control">
+                        </div>
+                        <div class="col-md-3">
+                            <label>Lote</label>
+                            <input value="{{$producto_lote->lote}}" name="lote" type="text" readonly="" class="form-control">
+                        </div>
+                        <div class="col-md-3">
+                            <label>Registro Sanitario</label>
+                            <input value="{{$producto_lote->registro_sanitario}}" name="registro_sanitario" type="text" readonly="" class="form-control">
+                        </div>
+                        <div class="col-md-3">
+                            <label>Fecha de vencimiento</label>
+                            <?php
+							$fecha_vencimiento = "";
+							if($producto_lote->fecha_vencimiento!=""):
+                            	$originalDate = $producto_lote->fecha_vencimiento;
+                            	$fecha_vencimiento = date("d-m-Y", strtotime($originalDate));
+							endif;
+                            ?>
+                            <input value="<?php echo $producto_lote->fecha_vencimiento ?>" name="fecha_vencimiento" type="text" readonly="" class="form-control">
+                        </div>
+                        <div class="col-md-3">
+                            <label>Cantidad</label>
+                            <input autocomplete="off" onkeypress="return justNumbers(event);" value="<?php if($producto->id==11045 || $producto->id==15938 || $producto->id==14607 || $producto->id==14608):echo ($transferencia_productos->cantidad)/1000;else:echo $transferencia_productos->cantidad;endif;?>" name="cantidad" id="cantidad" type="text" class="form-control" required="">
+
+                        </div>
+                        <hr/>
+                        <div class="col-md-3">
+                            <label>Precio Unitario</label>
+                            <input value="<?php echo number_format($producto_lote->precio_unitario, 9, '.', '');?>" name="precio" id="precio" type="text" class="form-control" required="" readonly="">
+                        </div>
+                        <div class="col-md-3">
+                            <label>Cantidad Maxima</label>
+                            <input value="<?php if($producto->id==11045 || $producto->id==15938 || $producto->id==14607 || $producto->id==14608):echo ($lote->cantidad)/1000;else:echo $lote->cantidad;endif;?>" name="cantidad_actual" id="cantidad_actual" type="text" class="form-control" required="" readonly="">
+                        </div>
+                        @if($producto->presentacion==1)
+                            <div class="col-md-3">
+                                <label>Presentación Comercial</label>
+                                <input value="<?php echo $lote->presentacion_comercial?>" name="presentacion_comercial" id="presentacion_comercial" type="text" class="form-control" required="" readonly="">
+                            </div> 
+                        @else
+                            <input value="<?php echo $lote->presentacion_comercial?>" name="presentacion_comercial" id="presentacion_comercial" type="hidden">                                 
+                        @endif
+                        
+                        <div class="col-md-12" style="text-align:right; margin-top: 10px">                        
+                            <input value="Actualizar"  type="submit" class="btn btn-primary btn-md" id="btnReg">
+                        </div>
+                    </form>
+                </div>
+            </div>
+    </div>
+</div>
+@include('frontend.includes.footer')
+@endsection

@@ -1,0 +1,75 @@
+@extends('frontend.layouts.master')
+@section('renderjs')
+<script>
+   
+</script>
+@endsection
+@section('content')
+<div class="container col-md-6 col-md-offset-3">
+    <div class="panel panel-primary">
+        <div class="panel-heading">
+            <div class="panel-title">
+                Otros Reportes - {{$nombre_farmacia}}
+                <span class="pull-right">
+                    <a href="/stocksbyFamarcias/{{$id_farmacia}}" style="color:white">
+                        <i class="fa fa-arrow-left"></i> Ir al Stock
+                    </a>
+                </span>
+            </div>
+        </div>
+        <div class="panel-body">
+            <form class="" method="post" action="{{ route('otros_resporte_by_farmacia')}}" id="frmIci">
+                <input type="hidden" name="_token" value="{{ csrf_token() }}">
+                <div class="col-md-4">
+                    <label class="help-block">Fecha de Inicio <i class="fa fa-calendar"></i></label>
+                    <input id="fecha_inicio" name="fecha_inicio" type="text" placeholder="" class="form-control input-md datepicker" required="">
+                    <?php
+                    $originalDate = $f_inicio_operaciones;
+                    $fecha_operaciones = date("d-m-Y", strtotime($originalDate));
+                    ?> 
+                    <input id="fecha_inicio_operaciones" name="fecha_inicio_operaciones" type="hidden" value="<?php echo $fecha_operaciones; ?>">
+                    <input id="id_user" name="id_farmacia" type="hidden" value="{{$id_farmacia}}">
+                </div>
+                <div class="col-md-4">
+                    <label class="help-block">Fecha Fin <i class="fa fa-calendar"></i></label>
+                    <input id="fecha_fin" name="fecha_fin" type="text" placeholder="" class="form-control input-md datepicker" required="" value="{{$fecha_actual}}">
+                </div>
+                <div class="col-md-4">
+                    <label class="help-block">Tipo de Reporte <i class="fa fa-list"></i></label>
+                    <select class="form-control" name="tipo" required="">
+                        <option value="">--Seleccionar--</option>
+                        <option value="8">Por Productos atendidos</option>
+                        <option value="3">Por Productos no atendidos</option>
+                        <option value="4">Por Diagnostico</option>
+                        <option value="6">Por Servicios</option>
+                        <option value="7">Por Tipo de Beneficiarios</option>
+                        <!--<option value="9">Por MESES</option>-->
+                    </select>
+                </div>
+                <div class="col-md-8 pull-left" style="margin-top: 10px; font-size: 10px">
+                    <span>
+                        <?php 
+                        if($count_f_inicio_operaciones==0){
+                            echo "Nota Importante: La ".$nombre_farmacia." aun no usan el aplicativo web, por el cual no puede generar un Reporte ICI.";
+                        }else{   
+                        ?>                            
+                        Nota Importante: Inicio del uso del aplicativo web el 
+                        <?php
+                            echo $fecha_operaciones." para la ".$nombre_farmacia;
+                        }
+                        ?> 
+                    </span>
+                </div>
+                <div class="col-md-4 pull-right" style="margin-top: 10px">
+                     @if($count_f_inicio_operaciones>0)
+                    <button class="form-control btn btn-info" type="submit">Buscar</button>
+                    @else
+                    <button class="form-control btn btn-info" type="submit" disabled="">Buscar</button>
+                    @endif
+                </div>
+            </form>
+
+        </div>
+    </div>
+</div>
+@endsection

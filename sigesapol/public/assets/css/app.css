@@ -1,0 +1,120 @@
+/* Reset */
+.app-textarea {
+  resize: none;
+}
+/* Fix */
+.app-radio-fix01 {
+  top: -4px!important;
+}
+/* Table */
+.app-fix-table-horario tr th {
+  color: #3c763d!important;
+}
+.app-fix-table-horario tr td {
+  font-size: 12px!important;
+  background-color: #F2FBF2;
+}
+/* */
+.app-panel-title {
+  color: #3c763d;
+  padding: 10px 15px;
+  background-color: #E0E9E0;
+}
+
+.app-panel-option .form-group{
+  margin-bottom: 0px;
+}
+/* Bootstrap*/
+.app-disabled {
+  background-color: #eee;
+}
+.app-mt-0 {margin-top:0!important}
+.app-mt-1 {margin-top:.25rem!important}
+.app-mt-2 {margin-top:.5rem!important}
+.app-mt-3 {margin-top:1rem!important}
+.app-mt-4 {margin-top:1.5rem!important}
+.app-mt-5 {margin-top:3rem!important}  
+.app-mb-0 {margin-bottom:0!important}
+.app-mb-1 {margin-bottom:.25rem!important}
+.app-mb-2 {margin-bottom:.5rem!important} 
+.app-mb-3 {margin-bottom:1rem!important}
+.app-mb-4 {margin-bottom:1.5rem!important}
+.app-mb-5 {margin-bottom:3rem!important}
+.app-mb-auto {margin-bottom:auto!important}
+.app-table-h tr .app-turno, 
+.app-table-b tr .app-turno {
+  width: 100px;
+}
+.app-table-b tr .app-turno:nth-child(5) {
+  width: 80px;
+}
+/* Modal */
+.app-modal-reset {
+  padding-left: 17px;
+  padding-left: 17px;
+}
+.app-modal-reset textarea {
+  resize: none;
+}
+.app-modal-reset .modal-dialog { 
+  width: auto!important;
+  max-width: 600px;
+  margin: 30px auto;
+}
+/* fullcalendar*/
+.app-fullcalendar-day-disabled {
+  background-color: #eee;
+}
+.app-fullcalendar-day-enabled {
+  cursor: pointer;
+}
+.app-fullcalendar-feriado {
+  background-color: #E66B6B;
+}
+.fc-basic-view .fc-body .fc-row {
+  min-height: 2em !important;
+}
+.fc-toolbar {
+  padding: 5px 0 5px 0;
+  margin-bottom: 5px!important;
+}
+.fc-toolbar .fc-center h2{
+  font-size: 20px;
+  padding-top: 4px; 
+}
+.app-form .form-group label:first-child, .app-form label:first-child {
+  font-size: 11px !important;
+}
+.app-form .input-group-btn button {
+  padding: 3px 10px;
+}
+.app-form-group-span span {
+  border: 0;
+  border-top: 1px solid #c1c1c1;
+  padding: 6px 12px 6px 0;
+  box-shadow: none;
+  height: auto!important;
+}
+.app-form .select2-selection__rendered, 
+.app-form .select2-container--default,
+.app-form .select2-selection--single {
+  width: 100%!important;
+}
+.app-form hr.button {
+  margin-top: 10px;
+  margin-bottom: 20px;
+  border: 0;
+  border-top-color: currentcolor;
+  border-top-style: none;
+  border-top-width: 0px;
+  border-top: 1px solid #ccc;
+}
+
+/* Registro citas */
+.app-reserva-cita-hora-deparacion {
+  margin: 0 10px 10px 0
+}
+.app-gestion-cita-lista li:nth-child(1) {
+  background: #ebf5ec;
+  color: #3c763d;
+}

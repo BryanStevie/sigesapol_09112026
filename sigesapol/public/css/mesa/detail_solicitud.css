@@ -1,0 +1,47 @@
+.app-form-group-span span {
+    border: 0;
+    border-top: 1px solid #c1c1c1;
+    padding: 6px 12px 6px 0;
+    box-shadow: none;
+    height: auto !important;
+}
+
+.alta {
+    color: red;
+    font-weight: bold;
+}
+
+.media {
+    color: orange;
+    font-weight: bold;
+}
+
+.baja {
+    color: green;
+    font-weight: bold;
+}
+
+.user-data {
+    border: 1px solid rgba(0, 0, 0, 0.158);
+    padding: 15px;
+    border-radius: 5px;
+}
+
+label {
+    font-size: 13px;
+}
+
+.encabezado {
+    font-size: 16px;
+}
+
+.row {
+    padding: 2px 0;
+}
+
+.req-descripcion {
+    border: 1px solid rgba(0, 0, 0, 0.158);
+    padding: 8px;
+    border-radius: 5px;
+    height: 200px;
+}

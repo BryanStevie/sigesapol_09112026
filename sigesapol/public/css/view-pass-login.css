@@ -1,0 +1,51 @@
+.input_and_button {
+    display: flex;
+    justify-content:right;
+    align-items: center;
+    border: 1px solid #ced4da;
+    border-radius: 5px;
+    position: relative;
+}
+
+.btn-view-pass {
+    display: flex;
+    outline: none;
+    border: none;
+    background-color: white;
+    position: absolute;
+    padding: 0;
+    margin-right: 8px;
+    background-color: rgba(0, 0, 0, 0);
+}
+
+.form-signin input[type="password"] {
+    border-radius: .25rem;
+}
+
+.input_and_button:focus-within {
+    color: #212529;
+    background-color: #fff;
+    border-color: #86b7fe;
+    outline: 0;
+    box-shadow: 0 0 0 0.25rem rgba(13,110,253,.25);
+}
+
+.input-pass{
+    border: none;
+    box-shadow: none;
+    outline: none;
+    width: 100%;
+    padding-right: 34px;
+    margin-bottom: 0 !important  ;
+}
+
+.input-pass:focus {
+    outline: none;
+    box-shadow: none;
+}
+
+.btn-view-pass > span {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+}

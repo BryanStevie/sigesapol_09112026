@@ -1,0 +1,7198 @@
+<?php
+
+namespace App\Http\Controllers;
+
+use Illuminate\Http\Request;
+use App\Http\Requests;
+use App\Http\Controllers\Controller;
+use SoapClient;
+use Session;
+use DB;
+use App;
+use Exception;
+use Illuminate\Support\Facades\Route;
+use Auth;
+use Carbon\Carbon;
+use App\Models\Farmacia;
+use App\Models\Receta_vale;
+use App\Models\Cita;
+use App\Models\Prestaciones;
+use App\Models\User;
+use App\Models\Consultorio;
+use App\Models\SubConsultorio;
+use App\Models\Beneficiario;
+use App\Models\Emergencia;
+use App\Models\Forma_ingreso;
+use App\Models\Estado_ingreso;
+use App\Models\Distrito;
+use App\Models\Establecimiento;
+use App\Models\Kardexe;
+use App\Models\Categoria;
+use App\Models\Violencia;
+use App\Models\Producto_receta;
+use App\Models\Comisaria;
+use App\Models\Situacion;
+use App\Models\Unidadpago;
+use App\Models\Diagnostico;
+use App\Models\Tipo_beneficiario;
+use App\Models\Triaje;
+use App\Models\TipoViolencia;
+use App\Models\Medico_turno;
+use App\Models\Tipo_parentescos;
+use App\Models\Medico;
+use App\Models\Producto;
+use App\Models\TipoAtencione;
+use App\Models\Upss; 
+use App\Helpers\Validar;
+use App\Http\Requests\AdmisionFormRequest;
+use App\Http\Requests\AtencionEmergenciaFormRequest;
+use App\Http\Requests\DetalleAtencionFormRequest;
+use App\Http\Requests\EvaluacionEmergenciaFormRequest;
+use App\Http\Requests\GuardarTriajeRequest;
+use App\Models\Asegurado;
+use App\Models\Asegurado_historia;
+use App\Models\MadrePaciente;
+use App\Models\PadrePaciente;
+use App\Models\Receta_diagnostico;
+use App\Models\Departamento;
+use App\Models\Provincia; 
+use App\Models\Cama;
+use App\Models\Cuarto;
+use App\Models\EmergenciaReporte;
+use App\Models\Enfermeria;
+use App\Models\Gestacion;
+use App\Models\Laboratorio;
+use App\Models\Nati;
+use App\Models\Puerperio;
+use App\Models\Radiologia;
+use App\Models\Hospitalizacione;
+use App\Models\Prestacion_eventos;
+use App\Models\Prestacion_procedimiento;
+use Illuminate\Support\Facades\Log;
+use stdClass;
+
+class EmergenciaController extends Controller
+{ 
+
+  function __construct()
+    {
+        $this->middleware('auth'); 
+    } 
+    
+  public function buscar_atenciones() { 
+    if (!Auth::check()) :
+        return redirect('/auth/login');
+    else:
+      if(Auth::user()->actualizo_passw==0):
+        return redirect('auth/password/change');
+      endif;
+    endif;
+
+    return view('frontend.admision.emergencia.form_busqueda_atencion');
+  } 
+  
+  public function asegurados_by_post(Request $request){ 
+    $modelEmergencia = new Emergencia();
+    $data = $modelEmergencia->listado_de_asgurados_by_busqueda_atenciones($request->campo_de_busqueda, $request->valor_de_busqueda);
+    return response()->json($data); 
+  }
+  public function asegurados_atenciones_by_post(Request $request){ 
+    $modelEmergencia = new Emergencia();
+    $data = $modelEmergencia->listado_de_atenciones_by_asegurado($request->dni_beneficiario);
+    return response()->json($data); 
+  }
+ 
+
+  public function all_reporte_emergencia($id_user = 0) {
+    
+    if (!Auth::check()) :
+      return redirect('/auth/login');
+    else:
+      if(Auth::user()->actualizo_passw==0):
+        return redirect('auth/password/change');
+      endif;
+    endif;
+  
+    //VALIDAMO QUE SEA PRESCRIPTOR MEDICO QUE ES EL TIPO 1
+    if(Auth::user()->tipo_registro == 1 || Auth::user()->tipo_registro == 8 || Auth::user()->tipo_registro == 9){
+
+    }else{
+      Session::flash('flash_message', 'Sólo los médicos pueden registrar triaje');
+      return redirect('/');
+    }
+    //VALIDAMO QUE SEA PRESCRIPTOR MEDICO QUE ES EL TIPO 1
+    $model = new Triaje();
+    $prioridades = $model->ShowPrioridad(); //prioridades i ii iii iv
+
+    //VALIDAR MEDICO
+    $id_establecimiento=Auth::user()->id_establecimiento;// id_establecimiento = 76 - 1 mdico    
+    $dni=Auth::user()->dni;//10799662
+
+    $model_medico = new Medico();
+    $exite_medico=$model_medico->exite_medico($dni);
+    $exite_medico_ipress=$model_medico->medico_yaregistrado($dni, $id_establecimiento);
+   
+    if($exite_medico==0){
+       Session::flash('flash_message', 'Sólo los médicos pueden registrar triaje');
+      return redirect('/');
+    }else if($exite_medico_ipress==""){
+      $model_establecimiento = new Establecimiento();
+      $establecimiento=  $model_establecimiento->GetById($id_establecimiento);
+      Session::flash('flash_message', 'Usted no es Médico en el establecimiento: '. $establecimiento[0]->nombre);
+      return redirect('/');
+    } else {
+      $model_usuario = new User;
+      $user = $model_usuario->GetById(Auth::user()->id);
+      $id_consultorio = $user->id_consultorio;
+      //--------- 
+      $filtroServicio = 0;
+      $filtroConsultorio = 0;
+      if ($user->flagservicios == 0) {
+        switch($id_consultorio) {
+          case 49: // PEDIATRIA;
+          case 77: // GINECOLOGIA Y OBSTETRICIA
+            $filtroServicio = 1;
+            $filtroConsultorio = $id_consultorio;
+            foreach($prioridades as $key => $value) {
+              if ($value->id != 1 && $value->id != 2){
+                unset($prioridades[$key]);
+              }
+            }
+        }
+      }
+    }
+      
+    //dd($prioridades);
+    $model_usuario = new User;
+    $date = Carbon::now();
+    $fechaHasta = $date->format('d-m-Y');
+    $fechaDesde = $date->format('d-m-Y');
+    $dni_beneficiario='';
+    $nombre_beneficiario='';
+    $estado=1;
+
+    $model_categoria = new Categoria();
+    $motivo_ingreso = $model_categoria->ShowCategoria();
+
+    return view('frontend.admision.emergencia.all_reporte_emergencia',
+     compact(
+     'fechaDesde', 
+     'fechaHasta',
+     'dni_beneficiario', 
+     'nombre_beneficiario',
+     'prioridades',
+     'estado',
+     'motivo_ingreso'
+    ));
+  } 
+
+  public function all_triajes_atendidos($id_user = 0) {
+    
+    if (!Auth::check()) :
+      return redirect('/auth/login');
+    else:
+      if(Auth::user()->actualizo_passw==0):
+        return redirect('auth/password/change');
+      endif;
+    endif;
+
+    $ruta = Route::getCurrentRoute()->getPath();
+    if (count($ruta = explode("/", $ruta)) > 1);
+    $ruta = $ruta[0];
+    if ($ruta == "all_triajes_atendidos");
+    $ruta = "all_triajes_atendidos";
+    $menu = \App\Models\Menu::getMenuByUsuario(Auth::user()->id, $ruta);
+    $permiso = $menu[0];
+   
+  
+    //VALIDAMO QUE SEA PRESCRIPTOR MEDICO QUE ES EL TIPO 1
+    if(Auth::user()->tipo_registro == 1 ||  Auth::user()->tipo_registro == 9){
+
+    }else{ 
+      Session::flash('flash_message', 'Sólo los médicos pueden registrar triaje');
+      return redirect('/');
+    }
+    //VALIDAMO QUE SEA PRESCRIPTOR MEDICO QUE ES EL TIPO 1
+
+    //VALIDAR MEDICO
+    $id_establecimiento=Auth::user()->id_establecimiento;// id_establecimiento = 76 - 1 mdico    
+    $dni=Auth::user()->dni;//10799662
+
+    $model_medico = new Medico();
+    $exite_medico=$model_medico->exite_medico($dni);
+    $exite_medico_ipress=$model_medico->medico_yaregistrado($dni, $id_establecimiento);
+   
+    if($exite_medico==0){
+      Session::flash('flash_message', 'Sólo los médicos pueden registrar triaje');
+     return redirect('/');
+   }else if($exite_medico_ipress==""){
+     $model_establecimiento = new Establecimiento();
+     $establecimiento=  $model_establecimiento->GetById($id_establecimiento);
+     Session::flash('flash_message', 'Usted no es Médico en el establecimiento: '. $establecimiento[0]->nombre);
+     return redirect('/');
+   } else {
+     $model_usuario = new User;
+     $user = $model_usuario->GetById(Auth::user()->id);
+     
+     $id_consultorio = $user->id_consultorio;
+     //--------- 
+     $filtroServicio = 0;
+     $filtroConsultorio = 0;
+     if ($user->flagservicios == 0) {
+       switch($id_consultorio) {
+         case 49: // PEDIATRIA;
+         case 77: // GINECOLOGIA Y OBSTETRICIA
+           $filtroServicio = 1;
+           $filtroConsultorio = $id_consultorio;
+           foreach($objPrioridades as $key => $value) {
+             if ($value->id != 1 && $value->id != 2){
+               unset($objPrioridades[$key]);
+             }
+           }
+       }
+     }
+     
+
+    //dd($prioridades);
+    $model_usuario = new User;
+    $model_establecimiento = new Establecimiento;
+    $establecimiento = $model_establecimiento->Get(Auth::user()->id_establecimiento);
+
+    $date = Carbon::now();
+    $fechaHasta = $date->format('d-m-Y');
+    $fechaDesde = $date->format('d-m-Y');
+    $dni_beneficiario='';
+    $nombre_beneficiario='';
+    $estado=1;
+     
+    $objConsultorio = Consultorio::where('id', '=', Auth::user()->id_consultorio_ticket)->first(); 
+    if($objConsultorio == null){
+      $objConsultorio_descripcion = '' ;
+    }else{
+      $objConsultorio_descripcion = $objConsultorio->nombre;
+    }
+
+
+    return view(
+      'frontend.admision.emergencia.all_triajes_atendidos',
+     compact(
+     'fechaDesde', 
+     'fechaHasta',
+     'dni_beneficiario', 
+     'nombre_beneficiario', 
+     'estado', 
+     'establecimiento',
+     'objConsultorio_descripcion',
+     'permiso'
+    ));
+
+
+  } 
+}
+  
+  public function triaje() {
+
+    if (!Auth::check()) :
+        return redirect('/auth/login');
+    else:
+      if(Auth::user()->actualizo_passw==0):
+        return redirect('auth/password/change');
+      endif;
+    endif;
+  
+    $ruta = Route::getCurrentRoute()->getPath();
+    if (count($ruta = explode("/", $ruta)) > 1);
+    $ruta = $ruta[0];
+    
+    if ($ruta == "all_emergencia_triaje")
+      $ruta = "all_triajes_atendidos";
+
+    $menu = \App\Models\Menu::getMenuByUsuario(Auth::user()->id, $ruta);
+    $permiso = $menu[0];
+    
+    if ($permiso->crear == 0)
+      return redirect('/inicio')->withFlashSuccess("No tiene Permiso para ingresar a la url ingresada");
+
+    //VALIDAMO QUE SEA PRESCRIPTOR MEDICO QUE ES EL TIPO 1
+    if(Auth::user()->tipo_registro == 1 || Auth::user()->tipo_registro == 9){
+
+    }else{ 
+      Session::flash('flash_message', 'Sólo los médicos pueden registrar triaje');
+      return redirect('/');
+    }
+    //VALIDAMO QUE SEA PRESCRIPTOR MEDICO QUE ES EL TIPO 1
+
+    $model = new Triaje();
+    $objPrioridades = $model->ShowPrioridad(); //prioridades i ii iii iv
+
+    $model_beneficiario = new Tipo_beneficiario;
+    $tipo_beneficiario = $model_beneficiario->ShowTipo_beneficiario(); // 1 - 12 / 13 = civil
+    $model_usuario = new User;
+    $user = $model_usuario->GetById(Auth::user()->id);
+    $id_consultorio = $user->id_consultorio;
+
+    $model_kardex = new Kardexe();
+    $fechaServidor = $model_kardex->getFechaServidor(); 
+
+    //VALIDAR MEDICO
+    $id_establecimiento=Auth::user()->id_establecimiento;// id_establecimiento = 76 - 1 mdico    
+    $dni=Auth::user()->dni;
+
+    $model_medico = new Medico();
+    $exite_medico=$model_medico->exite_medico($dni);
+    $exite_medico_ipress=$model_medico->medico_yaregistrado($dni, $id_establecimiento);
+   
+    if($exite_medico==0){
+       Session::flash('flash_message', 'Sólo los médicos pueden registrar triaje');
+      return redirect('/');
+    }else if($exite_medico_ipress==""){
+      $model_establecimiento = new Establecimiento();
+      $establecimiento=  $model_establecimiento->GetById($id_establecimiento);
+      Session::flash('flash_message', 'Usted no es Médico en el establecimiento: '. $establecimiento[0]->nombre);
+      return redirect('/');
+    } else {
+      $model_usuario = new User;
+      $user = $model_usuario->GetById(Auth::user()->id);
+      $id_consultorio = $user->id_consultorio;
+      //--------- 
+      $filtroServicio = 0;
+      $filtroConsultorio = 0;
+      if ($user->flagservicios == 0) {
+        switch($id_consultorio) {
+          case 49: // PEDIATRIA;
+          case 77: // GINECOLOGIA Y OBSTETRICIA
+            $filtroServicio = 1;
+            $filtroConsultorio = $id_consultorio;
+            foreach($objPrioridades as $key => $value) {
+              if ($value->id != 1 && $value->id != 2){
+                unset($objPrioridades[$key]);
+              }
+            }
+        }
+      }
+      
+
+      $model_f_ingreso = new Forma_ingreso();
+      $formas_ingreso = $model_f_ingreso->ShowForma_ingreso(); 
+
+      $model_categoria = new Categoria();
+      $motivo_ingreso = $model_categoria->ShowCategoria(); 
+
+      //---------
+      unset($model_usuario, $user);
+      $date = Carbon::now();
+      $hora = $date->format('H:i:s');
+
+      $tipoPartosSql = "SELECT * FROM tipo_partos";
+      $tipoPartos = DB::select($tipoPartosSql);
+  
+      $tipoDocsNatiSql = "SELECT * FROM tipo_doc_nati";
+      $tipoDocsNati = DB::select($tipoDocsNatiSql);
+      $flag_api_sp = DB::table('config_options')->where('id', 5)->value('api_sp_activated'); // si es true debería utilizarse el API de SALUDPOL , caso contrario, la ws de SALUDPOL
+      return view('frontend.admision.emergencia.triaje', [
+        'filtroServicio' => $filtroServicio,       
+        'filtroConsultorio' => $filtroConsultorio, //* consultorio actual - id
+        'prioridades' => $objPrioridades,          //* I II III IV
+        'tipo_beneficiario' => $tipo_beneficiario,  //* 1 - 12 / 13 
+        'formas_ingreso' => $formas_ingreso,
+        'motivo_ingreso' => $motivo_ingreso,
+        'hora'=> $hora,
+        'tipoPartos' => $tipoPartos,
+        'tipoDocsNati' => $tipoDocsNati,
+        'flag_api_sp' => $flag_api_sp,
+      ]);
+    }
+  }
+
+
+  public function edit_emergencia_triaje($id) {
+    if (!Auth::check()):
+      return redirect('/auth/login');
+    endif;
+
+    $modelEmergencia = new Emergencia();
+    $data = $modelEmergencia->ListarTriajeById($id);
+
+    $model = new Triaje();
+    $objPrioridades = $model->ShowPrioridad();
+
+    $topicos=null;
+    $topicos = $model->getTopicoByIdPrioridad($data[0]->id_prioridad);
+    if ($data[0]->triaje_id == 11) {
+      $topicos=[];
+    }
+    $talla_cm = $data[0]->talla_cm;
+    $peso_kg = $data[0]->peso_kg;
+    $edadpaciente = $data[0]->edadpaciente;
+    $sexo = $data[0]->sexo;
+    
+    if ($talla_cm != "") {  
+        $pesoIdeal=50+(($talla_cm-150)/4)*3+($edadpaciente-20)/4;
+        if($sexo=="M") {
+              $pesoIdeal=$pesoIdeal*0.9;
+        }
+    }else{
+       $pesoIdeal = "";
+    }
+
+    if ($peso_kg != "" && $talla_cm != "") { 
+        $talla_en_metros =  $talla_cm*0.01;     
+        $imc=   $peso_kg / ($talla_en_metros * $talla_en_metros);
+        $imc=   number_format($imc, 2, '.', '');
+    } else {
+        $imc = '';
+    }
+      
+
+    $model_f_ingreso = new Forma_ingreso();
+    $formas_ingreso = $model_f_ingreso->ShowForma_ingreso(); 
+
+    $model_categoria = new Categoria();
+    $motivo_ingreso = $model_categoria->ShowCategoria(); 
+ 
+    ///PADRE 
+    $padre_paciente = null; 
+    if($data[0]->id_padre_paciente!=null){
+      $padre_paciente = PadrePaciente::find($data[0]->id_padre_paciente); 
+    }
+
+    ///MADRE 
+    $madre_paciente = null;
+    if($data[0]->id_madre_paciente!=null){
+      $madre_paciente = MadrePaciente::find($data[0]->id_madre_paciente); 
+    } 
+    //dd($data[0]);
+    return view('frontend.admision.emergencia.edit_triaje', [
+      'data' => $data[0],
+      'imc'=>$imc,  
+      'pesoIdeal'=>$pesoIdeal, 
+      'prioridades' => $objPrioridades, 
+      'topicos' => $topicos,
+      'formas_ingreso' => $formas_ingreso,
+      'motivo_ingreso' => $motivo_ingreso,
+      'padre_paciente' => $padre_paciente,
+      'madre_paciente' => $madre_paciente,]);
+  }
+   
+  public function get_topico_por_id_prioridad($id_prioridad){
+		
+		if (!Auth::check()):
+			return redirect('/auth/login');
+		endif;
+    $model = new Triaje();
+    $topicos = $model->getTopicoByIdPrioridad($id_prioridad);
+    return $topicos;
+	}
+
+  public function get_topico_por_id_prioridad_sexo_edad($id_prioridad, $sexo, $edad){
+		
+		if (!Auth::check()):
+			return redirect('/auth/login');
+		endif;
+    $model = new Triaje();
+    $topicos = $model->getTopicoByIdPrioridad_Sexo_edad($id_prioridad, $sexo, $edad);
+    return $topicos;
+	}
+
+  public function get_topico_por_id_prioridad_sexo_edad_triaje($id_prioridad, $sexo, $edad){
+    
+    if (!Auth::check()):
+      return redirect('/auth/login');
+    endif;
+    $model = new Triaje();
+    $topicos = $model->getTopicoByIdPrioridad_Sexo_edad_triaje($id_prioridad, $sexo, $edad);
+    return $topicos;
+  }
+  
+  public function obtener_triaje_por_prioridad($prioridad) {
+
+    $TriajePrioridad = new Triaje;
+    $Triaje = $TriajePrioridad->ShowTriaje($prioridad) ;
+    return $Triaje;
+  }  
+
+  //----------  TRIAJE x EMERGENCIA - STORE
+  /* public function registrar_emergencia_triaje(Request $request) { */ 
+  public function registrar_emergencia_triaje(GuardarTriajeRequest $request) {
+    if (!Auth::check()):
+        return redirect('/auth/login');
+    endif; 
+    // IMPLEMENTAR ACA LA INSERCION EN BD CON LOS CAMPOS CORRESPONDIENTES A LA TABLA ASEGURADOS
+    
+
+    $id_asegurado = "";
+    $objAsegurado = new \App\Models\Paciente;
+
+    //VALIDA TIPO DOC NULO EN ASEGURADOS
+    $tipoDocNullAse=$objAsegurado->GetAseguradosSoloDNI($request->nro_doc_ident); 
+    if($tipoDocNullAse){
+      if($tipoDocNullAse->id_tipo_doc_ident==null){
+        $objAseguradoEdit = \App\Models\Paciente::find($tipoDocNullAse->id); 
+        if($request->id_tipo_doc_ident=='1'){ 
+          $objAseguradoEdit->id_tipo_doc_ident = '1';  
+          $objAseguradoEdit->save(); 
+        }else if($request->id_tipo_doc_ident=='2'){ 
+          $objAseguradoEdit->id_tipo_doc_ident = '2';  
+          $objAseguradoEdit->save(); 
+        }else if($request->id_tipo_doc_ident=='3'){ 
+          $objAseguradoEdit->id_tipo_doc_ident = '3';  
+          $objAseguradoEdit->save(); 
+        }else if($request->id_tipo_doc_ident=='4'){ 
+          $objAseguradoEdit->id_tipo_doc_ident = '4';  
+          $objAseguradoEdit->save(); 
+        }else if($request->id_tipo_doc_ident=='11'){ 
+          $objAseguradoEdit->id_tipo_doc_ident = '11';  
+          $objAseguradoEdit->save(); 
+        }else if($request->id_tipo_doc_ident=='12'){ 
+          $objAseguradoEdit->id_tipo_doc_ident = '12';  
+          $objAseguradoEdit->save(); 
+        }else if($request->id_tipo_doc_ident=='13'){ 
+          $objAseguradoEdit->id_tipo_doc_ident = '13';  
+          $objAseguradoEdit->save(); 
+        }else if($request->id_tipo_doc_ident=='14'){ 
+          $objAseguradoEdit->id_tipo_doc_ident = '14';  
+          $objAseguradoEdit->save(); 
+        }
+      }
+    }
+
+    $existe_datos_asegurado = $objAsegurado->GetAseguradoByDNI($request->nro_doc_ident, $request->id_tipo_doc_ident); 
+    if($existe_datos_asegurado==null){   
+      $id_aseg_paciente=$objAsegurado->GetAseguradosSoloDNI($request->nro_doc_ident); 
+      if($id_aseg_paciente!=null){
+            $objAseguradoEdit = \App\Models\Paciente::find($existe_datos_asegurado->id);  
+            $objAseguradoEdit->codigo_ubig    = $request->codigo_ubig; 
+            $objAseguradoEdit->domicilio    = $request->domicilio;  
+            
+            if($request->id_departamento!=null){
+              $objAseguradoEdit->id_departamento    = $request->id_departamento; 
+            }
+            
+            if($request->id_provincia!=null){
+              $objAseguradoEdit->id_provincia    = $request->id_provincia; 
+            }
+            
+            if($request->id_distrito!=null){
+              $objAseguradoEdit->id_distrito    = $request->id_distrito; 
+            }
+
+            if($request->nro_doc_ident == $request->nrodoctitular){
+              if($request->cip_titular!=null&&$request->cip_titular!=''){
+                $objAseguradoEdit->cip = $request->cip_titular;
+              }  
+            }
+
+            $objAseguradoEdit->nombre  = ($request->nombre);
+            $objAseguradoEdit->paterno = ($request->paterno);
+            $objAseguradoEdit->materno = ($request->materno);
+
+            if($request->foto_paciente!=null){
+              $objAseguradoEdit->foto    = $request->foto_paciente; 
+            } 
+            $objAseguradoEdit->save();  
+
+        $id_aseg_pacienteH=$objAsegurado->GetAsegurados_historiaSoloDNI($id_aseg_paciente->id, Auth::user()->id_establecimiento); 
+        if($id_aseg_pacienteH == null){
+          $objAsegurado_Historia = new \App\Models\Asegurado_historia; 
+          $objAsegurado_Historia->id_asegurado = $id_aseg_paciente->id;
+          $objAsegurado_Historia->id_establecimiento = Auth::user()->id_establecimiento;
+          $objAsegurado_Historia->nro_historia = $request->nro_doc_ident;
+          $objAsegurado_Historia->id_estado_reg = 1;
+          $objAsegurado_Historia->created_us = Auth::user()->id; 
+          $objAsegurado_Historia->save();  
+        }
+      } else {
+        
+        // Inicio de insersion en ASEGURADOS de pacientes presentes en SALUDPOL
+        $beneficiario_ajax = json_decode($request->beneficiario_ajax);
+
+        $objAsegurado = new \App\Models\Paciente;
+        
+        if($request->id_tipo_doc_ident=='1'){ 
+          $objAsegurado->tipo_doc_ident = 'DNI';
+        }else if($request->id_tipo_doc_ident=='2'){ 
+          $objAsegurado->tipo_doc_ident = 'CE';
+        }else if($request->id_tipo_doc_ident=='3'){ 
+          $objAsegurado->tipo_doc_ident = 'PAS';
+        }else if($request->id_tipo_doc_ident=='4'){ 
+          $objAsegurado->tipo_doc_ident = 'DIE';
+        }else if($request->id_tipo_doc_ident=='11'){ 
+          $objAsegurado->tipo_doc_ident = 'SDI';
+        }else if($request->id_tipo_doc_ident=='12'){ 
+          $objAsegurado->tipo_doc_ident = 'CUI';
+        }else if($request->id_tipo_doc_ident=='13'){ 
+          $objAsegurado->tipo_doc_ident = 'CNV';
+        }else if($request->id_tipo_doc_ident=='14'){ 
+          $objAsegurado->tipo_doc_ident = 'PTP';
+        }
+        
+        $objAsegurado->nro_doc_ident = $request->nro_doc_ident;
+
+        $objAsegurado->nombre  = ($request->nombre);
+        $objAsegurado->paterno = ($request->paterno);
+        $objAsegurado->materno = ($request->materno);
+
+        $objAsegurado->sexo = ($request->tipo_registro == '1') ? $request->sexo : $request->selectSexo;
+        $objAsegurado->fecha_nac = ($request->tipo_registro == '1') ? $request->fecha_nac : $request->fecha_nac2;
+        $objAsegurado->id_estado_reg = 1;
+        $objAsegurado->telefono = ''; 
+        $objAsegurado->correo = '';
+        $objAsegurado->created_us = Auth::user()->id; //! ----
+        $objAsegurado->created_at = Carbon::now();
+        $objAsegurado->id_tipo_doc_ident = $request->id_tipo_doc_ident;//! 1 -- siempre le estoy pasando 1 = DNI 
+        if($request->foto_paciente!=null){
+          $objAsegurado->foto    = $request->foto_paciente; 
+        }
+        $objAsegurado->id_tipo_beneficiario = ($request->tipo_beneficiario_saludpol); 
+        
+
+        if($request->nro_doc_ident == $request->nrodoctitular){
+          if($request->cip_titular!=null&&$request->cip_titular!=''){
+            $objAsegurado->cip = $request->cip_titular;
+          }  
+        } 
+            
+        if($request->id_departamento!=null){
+          $objAsegurado->id_departamento    = $request->id_departamento; 
+        }
+        
+        if($request->id_provincia!=null){
+          $objAsegurado->id_provincia    = $request->id_provincia; 
+        }
+        
+        if($request->id_distrito!=null){
+          $objAsegurado->id_distrito    = $request->id_distrito; 
+        }
+        $objAsegurado->codigo_ubig    = $request->codigo_ubig; 
+        $objAsegurado->domicilio    = $request->domicilio;  
+        
+        // Si se encontro beneficiario:
+        if ($beneficiario_ajax) {
+          $id_tipo_doc_ident = null;
+          $fecha = $beneficiario_ajax->caducidad_seguro;
+          $anio = substr($fecha, 0, 4);
+          $mes = substr($fecha, 4, 2);
+          $dia = substr($fecha, 6, 2);
+          $fechaFormateada = "$dia/$mes/$anio";
+
+          switch ($beneficiario_ajax->nomtipdocafiliado) {
+            case 'DNI':
+              $id_tipo_doc_ident = 1;
+              break;
+            case 'CE':
+              $id_tipo_doc_ident = 2;
+              break;
+            case 'PAS':
+              $id_tipo_doc_ident = 3;
+              break;
+            case 'DIE':
+              $id_tipo_doc_ident = 4;
+              break;
+           default:
+              break;
+          }
+          
+          $asegurado_titular = Asegurado::where("nro_doc_ident", "=", $beneficiario_ajax->nrodoctitular)->where("id_estado_reg","=",1)->first();
+          $objAsegurado->id_tipo_beneficiario = $beneficiario_ajax->id_tipo_beneficiario;
+          $objAsegurado->id_tipo_doc_ident = $id_tipo_doc_ident;
+          $objAsegurado->caducidad = $fechaFormateada;
+          if($asegurado_titular): $objAsegurado->id_asegurado_titular = $beneficiario_ajax != null ? $asegurado_titular->id_asegurado : "";endif;
+          $objAsegurado->dni_titular = $beneficiario_ajax->nrodoctitular;
+          $objAsegurado->materno_titular = $beneficiario_ajax->apemattitular;
+          $objAsegurado->nombre_titular = $beneficiario_ajax->nomtitular;
+          $objAsegurado->paterno_titular = $beneficiario_ajax->apepattitular;
+          $objAsegurado->tipo_doc_titular = $beneficiario_ajax->nomtipdoctitular;
+        }
+  
+        $objAsegurado->save();
+
+        $id_asegurado = $objAsegurado->id;
+
+        $objAseguradoHistoria = new \App\Models\Asegurado_historia;
+        $objAseguradoHistoria->id_asegurado = $id_asegurado;
+        $objAseguradoHistoria->id_establecimiento = Auth::user()->id_establecimiento;
+        $objAseguradoHistoria->nro_historia = $request->nro_doc_ident;
+        $objAseguradoHistoria->id_estado_reg = 1;
+        $objAseguradoHistoria->created_us = Auth::user()->id;
+        $objAseguradoHistoria->save();
+
+        if($request->nro_doc_ident == $request->nrodoctitular){
+          $objAseguradoActualiza = Asegurado::where("nro_doc_ident", "=", $request->nro_doc_ident)->where("id_estado_reg","=",1)->first();
+          $objAseguradoActualiza->id_asegurado_titular = $objAseguradoActualiza->id;
+          $objAseguradoActualiza->save();
+        }
+
+        // FIN
+      }
+    } else if($existe_datos_asegurado != null){   
+      $objAseguradoEdit = \App\Models\Paciente::find($existe_datos_asegurado->id);   
+      $objAseguradoEdit->codigo_ubig    = $request->codigo_ubig; 
+      $objAseguradoEdit->domicilio    = $request->domicilio; 
+      //dd($objAseguradoEdit);
+      if($request->foto_paciente!=null){
+        $objAseguradoEdit->foto    = $request->foto_paciente; 
+      }
+            
+      if($request->id_departamento!=null){
+        $objAseguradoEdit->id_departamento    = $request->id_departamento; 
+      }
+      
+      if($request->id_provincia!=null){
+        $objAseguradoEdit->id_provincia    = $request->id_provincia; 
+      }
+      
+      if($request->id_distrito!=null){
+        $objAseguradoEdit->id_distrito    = $request->id_distrito; 
+      } 
+
+      if($request->nro_doc_ident == $request->nrodoctitular){
+        if($request->cip_titular!=null&&$request->cip_titular!=''){
+          $objAseguradoEdit->cip = $request->cip_titular;
+        }  
+      } 
+ 
+      $objAseguradoEdit->id_tipo_beneficiario = ($request->tipo_beneficiario_saludpol);  
+
+      $objAseguradoEdit->nombre  = ($request->nombre);
+      $objAseguradoEdit->paterno = ($request->paterno);
+      $objAseguradoEdit->materno = ($request->materno);
+            
+      $objAseguradoEdit->save();  
+
+      $id_asegurado = $existe_datos_asegurado->id;
+      $existe_datos_asegurado->updated_at = Carbon::now();
+    } 
+ 
+      
+      ///DATOS DE SITUACION Y GRADO DE TITULAR 
+    if($request->nrodoctitular!=null){
+        $objBusTitu=$objAsegurado->GetAseguradosSoloDNI($request->nrodoctitular);  
+        if($objBusTitu){
+          $objAseguradoEditTitular = \App\Models\Paciente::find($objBusTitu->id);
+          if($request->grado_titular!=null&&$request->grado_titular!=''){
+            $objAseguradoEditTitular->grado = $request->grado_titular;
+          }
+          if($request->situaciontitular!=null&&$request->situaciontitular!=''){
+            $objAseguradoEditTitular->situacion_paciente = $request->situaciontitular;
+          }  
+          if($request->unidad_pnptitular!=null&&$request->unidad_pnptitular!=''){
+            $objAseguradoEditTitular->unidad_pnptitular = $request->unidad_pnptitular;
+          }  
+
+          if($request->nro_doc_ident == $request->nrodoctitular){
+            if($request->cip_titular!=null&&$request->cip_titular!=''){
+              $objAseguradoEditTitular->cip = $request->cip_titular;
+            }  
+          } 
+
+          $objAseguradoEditTitular->save();
+          
+          ///actualizamos la relacion a paciente asignando id del titular 
+          $objAseguradoEdit = \App\Models\Paciente::find($id_asegurado); 
+          $objAseguradoEdit->id_asegurado_titular    = $objBusTitu->id;  
+          if($request->situacionpaciente!=null&&$request->situacionpaciente!=''){
+            $objAseguradoEdit->situacion_paciente = $request->situacionpaciente;
+          }  
+          $objAseguradoEdit->save();  
+        }else{
+          ///SI EL TITULAR NO EXISTE EN SIGESAPOL
+					$objAseguradoEditTitular=null; 
+					$id_asegurado_titular=null;
+
+            if($request->nrodoctitular!=null){ 
+
+              if($request->dni_beneficiario == $request->nrodoctitular ){
+                $objAseguradoEdit = \App\Models\Paciente::find($id_asegurado);  
+                $objAseguradoEdit->id_asegurado_titular=$id_asegurado;
+                $objAseguradoEdit->save(); 
+
+              }/*else{ 
+
+                  $WsReniec = new \App\Ws\Reniec;
+                  $personal_reniec = $WsReniec->BuscarDNI($request->nrodoctitular);
+                  $personal = json_decode($personal_reniec, true);
+                  
+                  if($personal){
+                    $model_paciente = new \App\Models\Paciente(); 
+                    $model_paciente->tipo_doc_ident = "DNI";
+                    $model_paciente->nro_doc_ident = $request->nrodoctitular; 
+ 
+                    $model_paciente->nombre = $personal['nombres'];
+                    $model_paciente->paterno = $personal['paterno'];
+                    $model_paciente->materno = $personal['materno'];
+                    $model_paciente->id_estado_reg = "1";
+                    
+                    if ($personal['sexo']=='FEMENINO') {
+                      $model_paciente->sexo ='F' ;
+                      $model_paciente->bak_sexo ='F' ;
+                    } else {
+                      $model_paciente->sexo ='M' ;
+                      $model_paciente->bak_sexo ='M' ;
+                    }
+                    
+                    $model_paciente->fecha_nac = $personal['fecha_nac'];
+                    $model_paciente->observacion = "Registrado desde RENIEC";
+                    $model_paciente->created_us =  Auth::user()->id;
+                    $model_paciente->domicilio = $personal['direccionDomicilio'];
+                    $model_paciente->id_tipo_doc_ident = "1";
+                    $model_paciente->bak_fecha_nac = $personal['fecha_nac'];
+                    $model_paciente->save();
+                    
+                    $id_asegurado_titular=$model_paciente->id;
+  
+                    $objAseguradoEdit = \App\Models\Paciente::find($id_asegurado);  
+                    $objAseguradoEdit->id_asegurado_titular=$id_asegurado_titular;
+                    $objAseguradoEdit->save(); 
+                    
+  
+                    $updatetitular = \App\Models\Paciente::where('id', '=', $id_asegurado_titular)->first();
+                    $updatetitular->id_asegurado_titular    = $id_asegurado_titular;  
+  
+                    if($request->cip_titular!=null&&$request->cip_titular!=''){
+                      $updatetitular->cip = $request->cip_titular;
+                    }  
+                    if($request->grado_titular!=null&&$request->grado_titular!=''){
+                      $updatetitular->grado = $request->grado_titular;
+                    }
+                    
+                    $updatetitular->save(); 
+                  }
+              }*/
+
+            } 
+
+        }
+    }  
+      ///DATOS DE SITUACION Y GRADO DE TITULAR
+    
+
+
+    $objTriaje = new Emergencia();
+    $id_medico_triaje = Auth::user()->id;
+    $model_farma = new Farmacia;
+
+    $farma = $model_farma->GetFarmaByIdfarma($request->id_farmacia);
+    $id_establecimiento = $farma->id_establecimiento;
+    //$nro_emergencia = $objTriaje->getNroEmergencia($id_establecimiento);
+
+    //-- REGISTRAR EMERGENCIA --
+
+    $temperatura                = ($request->temperatura != '')       ? $request->temperatura : 0;
+    $sa02_porcentaje            = ($request->saturacion != '')        ? $request->saturacion : 0;
+    $presion_arterial_x         = $request->presion_arterial_x != ''  ? $request->presion_arterial_x : 0;
+    $presion_arterial_y         = $request->presion_arterial_y != ''  ? $request->presion_arterial_y : 0;
+    $talla_cm                   = ($request->talla != '')             ? $request->talla : 0;
+    $tamano_cintura_cm          = ($request->tamanio_cintura != '')   ? $request->tamanio_cintura : 0;
+    $frecuencia_respiratoria    = ($request->frecuencia_respiratoria != '') ? $request->frecuencia_respiratoria: 0;
+    $peso_kg                    = ($request->peso != '')              ? $request->peso: 0;
+    $frecuencia_cardiaca_fetal  = ($request->frecuencia_cardiaca_fetal != '') ? $request->frecuencia_cardiaca_fetal : 0;
+    $frecuencia_cardiaca        = ($request->frec_cardiaca != '')     ? $request->frec_cardiaca : 0;
+    $fi02                       = ($request->oxigenacion != '')       ? $request->oxigenacion : 0;
+    //$observacion_triaje         = ($request->observacion != '')       ? $request->observacion : $request->motivo_consulta_externo;
+    $observacion_triaje         = $request->observacionSeleccionado;
+
+    $id_padre_paciente = null;
+    $id_madre_paciente = null;
+    $id_forma_ingreso = $request->id_forma_ingreso ;
+
+    $id_estado_ingreso = $request->id_estado_ingreso ;
+    $id_motivo_ingreso = $request->id_motivo_ingreso ;
+    //$es_gestante = $request->es_gestante ; <- YA NO SE USA (DEPRECATED)
+    $es_gestante = 0;
+
+    /*  
+      //! ESTADO 2 = ATENTIDO x ADMISION ---- BRYAN 
+      //* ESTADO 1 = PENDIENTE -  APTO ADMISION
+      //? ESTADO 3 = REBOTA 
+    */
+
+    $estado = null;
+    $id_topico_generado = null;
+
+    //! ESTADO 2 = ATENTIDO x ADMISION ---- BRYAN 
+    //* ESTADO 1 = PENDIENTE -  APTO ADMISION
+    //? ESTADO 3 = REBOTO
+    
+    if ($request->id_prioridad == "4") {
+      $estado = 1; 
+      $id_topico_generado = $request->topicoSeleccionado;
+    } else { //! prioridad 1 2 3 
+      $estado = 1; 
+      $id_topico_generado = $request->topicoSeleccionado; //! topico seleccionado
+    }
+      
+    $date = Carbon::now();
+    $fechaActual = $date->format('d-m-Y');
+    $horaActual = $date->format('H:i:s');
+    
+    $fecha_registro_ingreso = $date;
+    /*
+    if($request->fecha_registro_ingreso==''||$request->fecha_registro_ingreso==null){
+      $fecha_registro_ingreso = $date;
+    }else{ 
+      $fecha_registro_ingreso = $request->fecha_registro_ingreso ;
+    } 
+    */
+    if($request->hora_registro_ingreso==''||$request->hora_registro_ingreso==null){
+      $hora_registro_ingreso = $horaActual;
+    }else{ 
+      $hora_registro_ingreso = $request->hora_registro_ingreso ;
+    }  
+    $registro_manual = $request->registro_manual ;
+
+    // insert - function
+    $p_id = $objTriaje->InsertTriaje(
+      $request->nro_doc_ident, 
+      $request->id_prioridad, 
+      $id_asegurado, 
+      $id_topico_generado, 
+      $id_medico_triaje, 
+      $temperatura, 
+      $sa02_porcentaje, 
+      $presion_arterial_x, 
+      $presion_arterial_y, 
+      $talla_cm, 
+      $tamano_cintura_cm, 
+      $frecuencia_respiratoria, 
+      $peso_kg, 
+      $frecuencia_cardiaca_fetal, 
+      $frecuencia_cardiaca, 
+      $fi02, 
+      $id_establecimiento, 
+      $observacion_triaje,       
+      $id_padre_paciente, 
+      $id_madre_paciente,
+      $estado , 
+      $id_forma_ingreso, 
+      $id_estado_ingreso, 
+      $id_motivo_ingreso, 
+      $fecha_registro_ingreso, 
+      $hora_registro_ingreso,
+      $registro_manual,
+      $es_gestante
+    ); 
+
+    $model_add_emergencia = Emergencia::where('id', '=', $p_id[0]->sp_emergencias_triaje_insert3)->first();
+
+    // GESTACION
+    $gestacion = $request -> esta_gestando == "true" ? true : false;
+    $fum = $gestacion == true ? $request -> ultimaMestruacion : null;
+    $fecha_prob_parto = $gestacion == true ? $request -> parto_probable : null;
+    $semana_gestacion = $request -> semana_gesta;
+    $nro_control_prenatal = $request -> control_prenatal;
+    $duda_fum = $request -> duda;
+    error_log("Gestacion(true=Si/false=No): ".$gestacion);
+    error_log($fecha_prob_parto);
+    error_log($semana_gestacion);
+    error_log($nro_control_prenatal);
+    error_log($duda_fum);
+    error_log(implode(array($request)));
+    if ($gestacion == true) {
+      $model_gestacion = new Gestacion;
+      $paciente = Asegurado::find($id_asegurado);
+      $paciente->estadios_salud_materna = '2';
+      $paciente->update_estadios_salud_materna = Carbon::now();
+      $paciente->id_prestacion_estadios_salud_materna = $model_add_emergencia->id;
+      $paciente->id_secuencia_estadios_salud_materna = '2';
+      $paciente->save();
+      $model_gestacion -> duda = $duda_fum;
+      $model_gestacion -> fech_ult_regla = $fum;
+      $model_gestacion -> fech_prob_parto = $fecha_prob_parto;
+      $model_gestacion -> semanas_gestacion = $semana_gestacion;
+      $model_gestacion -> num_controles = $nro_control_prenatal;
+      $model_gestacion->save();
+      $model_add_emergencia->id_gestacion = $model_gestacion -> id;
+    }
+    /****************PUERPERIO*********************************************/
+    $puerperio = $request -> esta_en_puerperio == "true" ? true : false;
+    $fecha_parto_real = $request -> fecha_parto;
+    $hora_parto_real = $request -> hora_parto;
+    $tipo_parto = $request -> tipo_parto;
+    $complicacion_parto = $request -> complicacion_parto;
+    $observacion_parto = $request -> descripcion_parto;
+    error_log($puerperio);
+    error_log($fecha_parto_real);
+    error_log($hora_parto_real);
+    error_log($tipo_parto);
+    error_log($complicacion_parto);
+    error_log($observacion_parto);
+    error_log(implode(array($request)));
+    if ($puerperio == true) {
+      $model_puerperia = new Puerperio;
+      $paciente = Asegurado::find($id_asegurado);
+      $paciente->estadios_salud_materna = '3';
+      $paciente->update_estadios_salud_materna = Carbon::now();
+      $paciente->id_prestacion_estadios_salud_materna = $model_add_emergencia->id;
+      $paciente->id_secuencia_estadios_salud_materna = '2';
+      $paciente->save();
+      $model_puerperia -> fecha_parto = $fecha_parto_real." ".$hora_parto_real;
+      $model_puerperia -> id_tipo_parto = $request -> tipo_parto;
+      $model_puerperia -> complicaciones = $complicacion_parto;
+      $model_puerperia -> descripcion = $observacion_parto;
+      $model_puerperia -> save();
+      $model_add_emergencia->id_puerperio = isset($model_puerperia -> id) ? $model_puerperia -> id : null;
+    }
+    /****************FIN PUERPERIO*********************************************/
+
+    //$valor_generar_id_ext_e=$objTriaje->generar_id_ext_e($p_id[0]->sp_emergencias_triaje_insert3); 
+    $model_add_emergencia->tipo_registro = $request->tipo_registro; 
+    $model_add_emergencia->no_amerita = $request->no_amerita; 
+    $model_add_emergencia->id_tipo_beneficiario = ($request->tipo_beneficiario_saludpol); 
+    
+    if($request->documento_titular!=null && $request->documento_titular != ''){
+      $model_add_emergencia->dni_titular =  $request->documento_titular; 
+    }
+
+    if($request->id_tipo_parentesco!=null){
+      $model_add_emergencia->id_tipo_parentesco = $request->id_tipo_parentesco;
+    }else{
+      $model_add_emergencia->id_tipo_parentesco = 8;
+    }  
+ 
+
+    if($request->flag_triaje!=null){ 
+      
+      $ticket_pendienteUp=\App\Models\Ticket::where('id', '=', $request->flag_triaje)->first();  
+      $model_add_emergencia->totem_at = $ticket_pendienteUp->created_at;
+      $model_add_emergencia->cod_totem = $ticket_pendienteUp->letra.''.$ticket_pendienteUp->numero;
+      $model_add_emergencia->a_llamado_at = $ticket_pendienteUp->a_llamado_at;
+      $model_add_emergencia->a_llamado_us = $ticket_pendienteUp->a_llamado_us;
+      $model_add_emergencia->id_ticket =$request->flag_triaje;
+      
+      $ticket_pendienteUp->atendido_at = Carbon::now();
+      $ticket_pendienteUp->atendido_us = Auth::user()->id;
+      $ticket_pendienteUp->llamado_at = null;
+      $ticket_pendienteUp->llamado_us = null;
+      $ticket_pendienteUp->anulado_at = null;
+      $ticket_pendienteUp->anulado_us = null;
+      $ticket_pendienteUp->seleccionado_at = null;
+      $ticket_pendienteUp->seleccionado_us = null; 
+      $ticket_pendienteUp->id_estado_tv = 3;
+      $ticket_pendienteUp->estado_llamada = 1;  
+      
+      if($ticket_pendienteUp!=null){
+        $model_add_emergencia->totem_at = $ticket_pendienteUp->created_at;
+        $model_add_emergencia->cod_totem = $ticket_pendienteUp->letra.''.$ticket_pendienteUp->numero;
+        $model_add_emergencia->a_llamado_at = $ticket_pendienteUp->a_llamado_at;
+        $model_add_emergencia->a_llamado_us = $ticket_pendienteUp->a_llamado_us;
+        $ticket_pendienteUp->flag_triaje=1;
+        
+        //update tickets donde el codigo de emregncia se aigual al del ticket 
+        $objTriaje = new Emergencia();
+        $objTriaje->update_ticket_by_emergencia_codigo_ticket(($ticket_pendienteUp->letra.''.$ticket_pendienteUp->numero));
+      }
+      $ticket_pendienteUp->save(); 
+
+      $ticket_pendiente=\App\Models\Ticket::where('id', '=', $request->flag_triaje)->first();  
+      if($ticket_pendiente->flag_triaje==0){
+        $ticket_pendiente->flag_triaje=1;
+        
+        $ticket_pendiente->atendido_at = Carbon::now();
+        $ticket_pendiente->atendido_us = Auth::user()->id;
+        $ticket_pendiente->llamado_at = null;
+        $ticket_pendiente->llamado_us = null;
+        $ticket_pendiente->anulado_at = null;
+        $ticket_pendiente->anulado_us = null;
+        $ticket_pendiente->seleccionado_at = null;
+        $ticket_pendiente->seleccionado_us = null; 
+        $ticket_pendiente->id_estado_tv = 3;
+        $ticket_pendiente->estado_llamada = 1;  
+
+        $ticket_pendiente->save(); 
+      }
+    }
+
+      //-----------------VALIDAMOS SI EL ESTABLECIMIENTO  TIENE USO DE TOTEM-----------------//
+      $model_establecimiento = new Establecimiento;
+      $establecimiento = $model_establecimiento->Get(Auth::user()->id_establecimiento);
+      //-----------------VALIDAMOS SI EL ESTABLECIMIENTO  TIENE USO DE TOTEM-----------------// 
+   
+      if($establecimiento->flag_colas==1){
+        ///solo registrar los que son diferentes de CAR  
+          if ($request->id_prioridad == "1" || $request->id_prioridad == "2" || $request->id_prioridad == "3" || $request->id_prioridad == "4") {
+            
+            $model_f_ingreso = \App\Models\Forma_ingreso::where('id', '=', $request->id_forma_ingreso)->first(); 
+            if ($model_f_ingreso->descripcion != "FALLECIDO") {
+              ///INSERT A LA TABLA DE TICKET COMO ADMISION 
+              $objTicket = new \App\Models\Ticket;
+              $objTicket->id_totem = 6;
+              $objTicket->id_totem_opcion = 6;
+              $objTicket->id_asegurado = $id_asegurado;
+              $objTicket->letra = 'A';
+
+              $numero=$model_establecimiento->generar_secuencia_numero_ticket(); 
+              if($numero!=null){
+                $objTicket->numero = $numero->count + 1;  
+              }else{
+                $objTicket->numero = $numero + 1;  
+              } 
+              $objTicket->id_cita = 0;
+              $objTicket->created_at = $date;
+              $objTicket->estado = 1;
+              $objTicket->id_estado_tv = 0;
+              $objTicket->estado_llamada = 0;
+              $objTicket->cantidad_llamada = 0;
+              
+              //UBICAMOS EL ID DE SUB CONSULTORIO
+              $v_id_consultorio = $model_establecimiento->buscar_id_consultorio_totem_opciones(6); //SELECT id_consultorio FROM totem_opciones WHERE id = '6';
+              if($v_id_consultorio){
+                //dd($v_id_consultorio); //id_consultorio
+                $v_sub_consultorio_id =  $model_establecimiento->buscar_id_sub_consultorios_opciones(6, $v_id_consultorio->id_consultorio ); 
+                //(SELECT id FROM sub_consultorios WHERE id_establecimiento = (SELECT id_establecimiento FROM totems WHERE id = p_id_totem) AND id_consultorio = v_id_consultorio ORDER BY id LIMIT 1);
+                //dd($v_sub_consultorio_id);
+              }
+              
+              //$objTicket->id_sub_consultorio = '1751';
+              $objTicket->id_sub_consultorio = $v_sub_consultorio_id->id;
+              $objTicket->ticketiniciado = 0;
+              $objTicket->nombres_reniec = $request->paterno.' '.$request->materno.' '.$request->nombre;
+              $objTicket->dni_reniec = $request->nro_doc_ident;
+              $objTicket->flag_triaje = 1; 
+              $objTicket->id_emergencia_a = $model_add_emergencia->id; 
+              $objTicket->flag_admision = 0; 
+              $objTicket->save();
+
+              $model_add_emergencia->id_ticket_admision = $objTicket->id; 
+            } 
+        }
+      }  
+      //-----------------VALIDAMOS SI EL ESTABLECIMIENTO  TIENE USO DE TOTEM-----------------//
+    $model_add_emergencia->save(); 
+ 
+    $id_emergencia_triaje = $p_id[0]->sp_emergencias_triaje_insert3;
+    Session::flash('flash_message', 'Registro exitoso');
+    return redirect('/ver_datos_triaje/'.$id_emergencia_triaje); 
+
+  }
+
+  //public function registrar_admision_emergencia_transaction(Request $request)
+  public function registrar_admision_emergencia_transaction(AdmisionFormRequest $request)
+
+  {
+     
+    $id_user = Auth::user()->id;
+    $id_establecimiento = Auth::user()->id_establecimiento;
+
+    $model_admision_emergencia = new Emergencia; 
+    $p_diagnostico = "{}";
+     
+    ///MOTIVO DE INGRESO tipo 4 es EVACUADO
+    if ($request->id_categoria == 4) {
+      $id_departamento_evac = $request->id_departamento_evac;
+      $id_unidad_policial = $request->id_unidad_policial;
+      $id_situacion_evac = $request->id_situacion_evac;
+      $diagnostico = $p_diagnostico;
+      $id_situacion_evac = $request->id_situacion_evac;
+      $id_violencia = 0;
+      $id_tipo_violencia = 0;
+      $id_comisaria = 0;
+      $id_situacion_vio = 0;
+      $dpto_vio = 0;
+      $prov_vio = 0;
+      $dist_vio = 0;
+      $id_unidad_vio = 0;
+
+    ///MOTIVO DE INGRESO tipo 4 es VIOLENCIA
+    }else  if ($request->id_categoria == 3) {
+        $id_violencia = $request->id_violencia;
+        if($id_violencia!=3){
+          $id_tipo_violencia = $request->id_tipo_violencia;
+          $id_comisaria = $request->id_comisaria;
+          $id_situacion_vio = $request->id_situacion;
+          $dpto_vio = $request->DepartamentoAc;
+          $prov_vio = $request->ProvinciaAc;
+          $dist_vio = $request->DistritoAc;
+          $id_unidad_vio = $request->id_unidad;
+          $id_departamento_evac = 0;
+          $id_unidad_policial = 0;
+          $id_situacion_evac = 0; 
+          $diagnostico = $p_diagnostico;
+          $id_situacion_evac = 0;
+        }
+        else{
+          $id_tipo_violencia = $request->id_tipo_violencia;
+          $id_comisaria = 0;
+          $id_situacion_vio = $request->id_situacion;
+          $dpto_vio = 0;
+          $prov_vio = 0;
+          $dist_vio = 0;
+          $id_unidad_vio = 0;
+          $id_departamento_evac = 0;
+          $id_unidad_policial = 0;
+          $id_situacion_evac = 0; 
+          $diagnostico = $p_diagnostico;
+          $id_situacion_evac = 0;
+        }
+        
+    } else{
+
+      ///MOTIVO DE INGRESO tipo 1,2 es enfermedad comun y covid
+        $id_departamento_evac = 0;
+        $id_unidad_policial = 0;
+        $id_situacion_evac = 0; 
+        $diagnostico = $p_diagnostico;
+        $id_situacion_evac = 0;
+        $id_violencia = 0;
+        $id_tipo_violencia = 0;
+        $id_comisaria = 0;
+        $id_situacion_vio = 0;
+        $dpto_vio = 0;
+        $prov_vio = 0;
+        $dist_vio = 0;
+        $id_unidad_vio = 0; 
+    }
+
+    /// SI ES UN CIVIL TIENE ID PARENTESCO TIPO 13
+    if ($request->id_parentesco == 13) {
+      $model_oficial = new Medico;
+      $oficial = $model_oficial->GetMedicoById($request->oficial_guardia);
+      if($oficial){
+        $oficial_guardia = $oficial->nombre . ' ' . $oficial->paterno . ' ' . $oficial->materno;
+        $numero_documento_coronel_guardia = $oficial->dni ;
+      }else{
+        $oficial_guardia = '';
+        $numero_documento_coronel_guardia = '';
+      }
+    }else {
+      $oficial_guardia = '';
+      $numero_documento_coronel_guardia = '';
+    }
+
+
+    switch($request->tipodoc_beneficiario_bus){
+      case 1: $tipodoc='DNI'; break;
+      case 2: $tipodoc='CARNET'; break;
+      case 3: $tipodoc='PASAPORTE'; break;
+      case 4: $tipodoc='DIE'; break;
+      case 5: $tipodoc='NN'; break;
+    }
+
+    if($request->hd_action == 'nuevo') {
+      $request->id = 0;
+      if($request->tipodoc_beneficiario_bus==5){
+        $existe_beneficiario = null;
+        $secuencia = \App\Models\Asegurado::select(DB::raw('count(*) as nro_sec'))->where('tipo_doc_ident', 'NN')->first();
+        $request->dni_beneficiario='NN00'.$secuencia->nro_sec;
+        $date = Carbon::now();
+        $request->fnacimiento = $date->format('d-m-Y');
+        
+      }else{ 
+        $existe_beneficiario = \App\Models\Asegurado::where('nro_doc_ident', '=', $request->dni_beneficiario)->where('id_estado_reg', '=', 1)->first();
+      }
+       
+      if ($existe_beneficiario) {
+        $request->id_asegurado = $existe_beneficiario->id;
+      } else {
+        
+        $model_asegurado = new \App\Models\Asegurado;
+        $model_asegurado->tipo_doc_ident = $tipodoc;
+        $model_asegurado->id_tipo_doc_ident = $request->tipodoc_beneficiario_bus;
+        $model_asegurado->nro_doc_ident = $request->dni_beneficiario;
+        $model_asegurado->nombre = $request->nombre_beneficiario;
+        $model_asegurado->paterno = $request->paterno_beneficiario;
+        $model_asegurado->materno = $request->materno_beneficiario;
+        $model_asegurado->sexo = $request->nomsexo;
+        $model_asegurado->fecha_nac = $request->fnacimiento;
+        $model_asegurado->id_estado_reg = 1;
+        $model_asegurado->foto = $request->foto_paciente;
+        $model_asegurado->id_tipo_beneficiario = 1;
+        $model_asegurado->created_us = $id_user;
+        $model_asegurado->id_departamento = $request->Departamento;
+        $model_asegurado->id_provincia = $request->Provincia;
+        $model_asegurado->id_distrito = $request->Distrito;
+        $model_asegurado->domicilio = $request->direccion_referencial;
+        $model_asegurado->telefono = $request->telefono;
+        
+        if($request->id_situacion != null && $request->id_situacion != '' && $request->id_situacion != 0){
+          $situacion_obj = Situacion::where('id', '=', $request->id_situacion)->first();
+          $model_asegurado->situacion_paciente = $situacion_obj->descripcion;
+        }
+
+        $model_asegurado->save();
+
+        $id_asegurado = $model_asegurado->id;
+
+        $objAseguradoHistoria = new \App\Models\Asegurado_historia;
+        $objAseguradoHistoria->id_asegurado = $id_asegurado;
+        $objAseguradoHistoria->id_establecimiento = Auth::user()->id_establecimiento;
+        $objAseguradoHistoria->nro_historia = $request->dni_beneficiario;
+        $objAseguradoHistoria->id_estado_reg = 1;
+        $objAseguradoHistoria->created_us = Auth::user()->id;
+        $objAseguradoHistoria->save();
+
+        $request->id_asegurado = $id_asegurado;
+      }
+    }else{
+        $model_asegurado = \App\Models\Asegurado::where('id', '=', $request->id_asegurado)->where('id_estado_reg', '=', 1)->first();
+        //dd($model_asegurado);
+        //$model_asegurado->tipo_doc_ident = $tipodoc;
+        $model_asegurado->id_tipo_doc_ident = $request->tipodoc_beneficiario_bus;
+        $model_asegurado->nro_doc_ident = $request->dni_beneficiario;
+        $model_asegurado->nombre = $request->nombre_beneficiario;
+        $model_asegurado->paterno = $request->paterno_beneficiario;
+        $model_asegurado->materno = $request->materno_beneficiario;
+        $model_asegurado->sexo = $request->nomsexo;
+        $model_asegurado->fecha_nac = $request->fnacimiento;
+        $model_asegurado->id_tipo_beneficiario = $request->id_parentesco;
+        $model_asegurado->foto = $request->foto_paciente;
+        $model_asegurado->updated_us = Auth::user()->id;
+        
+        $model_asegurado->id_departamento = $request->Departamento;
+        $model_asegurado->id_provincia = $request->Provincia;
+        $model_asegurado->id_distrito = $request->Distrito;
+        $model_asegurado->domicilio = $request->direccion_referencial;
+        $model_asegurado->telefono = $request->telefono;
+
+        $objAseguradoHistoria = \App\Models\Asegurado_historia::where('id_asegurado', '=', $request->id_asegurado)->where('id_establecimiento', '=', Auth::user()->id_establecimiento)->where('id_estado_reg', '=', 1)->first();
+
+        if(count($objAseguradoHistoria)==0):
+          $objAseguradoHistoria = new \App\Models\Asegurado_historia;
+          $objAseguradoHistoria->id_asegurado = $request->id_asegurado;
+          $objAseguradoHistoria->id_establecimiento = Auth::user()->id_establecimiento;
+          $objAseguradoHistoria->nro_historia = $request->dni_beneficiario;
+          $objAseguradoHistoria->id_estado_reg = 1;
+          $objAseguradoHistoria->created_us = Auth::user()->id;
+          $objAseguradoHistoria->save();          
+        endif;
+        
+        if($request->id_situacion != null && $request->id_situacion != '' && $request->id_situacion != 0){
+          $situacion_obj = Situacion::where('id', '=', $request->id_situacion)->first();
+          $model_asegurado->situacion_paciente = $situacion_obj->descripcion;
+        }
+
+        //TODO: NO FUNCIONA, CAMPO id_tipo_beneficiario llega vacio al ejecutar el save().
+        $model_asegurado->save(); 
+    }
+ 
+    //nomsexo foto 
+    $date = Carbon::now(); 
+    $fechaActual = $date->format('d-m-Y');
+    $horaActual = $date->format('H:i:s');
+    ///generamos codigo cups 
+    /*
+    select * from establecimientos e 
+    inner join ipress i on e.codigo = i.codigo 
+    where e.id = 76
+
+    select * from establecimientos where id = 76 
+    */
+    $objEstablecimiento= Establecimiento::where('id', '=', Auth::user()->id_establecimiento)->first(); //CODIGO ESTABLECIMIENTO
+    $objCups_pnp = new \App\Models\Cups_pnp;
+    $objCups_pnp->codigo_ipress =$objEstablecimiento->codigo;
+    $objCups_pnp->año = substr($date->format('Y'), 2, 4); 
+    $objCups_pnp->intramural_extramural = 'I'; 
+    if($request->id_categoria==4){
+      $objCups_pnp->no_referidos_referidos = 1; 
+    }else{
+      $objCups_pnp->no_referidos_referidos = 0; 
+    }
+    $objCups_pnp->tipo_atencion = 2; 
+    $valorConCeros = $request->id; //  str_pad($request->id, 9, '0', STR_PAD_LEFT) Completa con ceros al inicio hasta tener una longitud de 10 caracteres
+    $objCups_pnp->id_ext = $valorConCeros; 
+    $objCups_pnp->corte_adm = 'CA_00001'; 
+    $objCups_pnp->fecha_ejecucion_atencion = $fechaActual;  
+    $objCups_pnp->save();
+
+
+    //actualiza id_tipo_parentesco
+    $model_add_emergencia = Emergencia::where('id', '=', $request->id)->first();
+    if($request->id_tipo_parentesco!=null){
+      $model_add_emergencia->id_tipo_parentesco = $request->id_tipo_parentesco;
+    }else{
+      $model_add_emergencia->id_tipo_parentesco = 8;
+    }
+    $model_add_emergencia->fecha_registro_admision = $date;
+    $model_add_emergencia->hora_registro_admision = $horaActual;
+
+  ///AGREGAMOS CUPS PNP PARA LA TABLA DE EMERGENCIA AGREGAMOS CUPS PNP PARA LA TABLA DE EMERGENCIA/// 
+    //$valor_generar_id_ext_e=$model_admision_emergencia->generar_cups_pnp($objCups_pnp->id);  
+    
+    //$objCups_pnpOB= \App\Models\Cups_pnp::where('id', '=', $objCups_pnp->id)->first(); 
+    $valor_cups_pnp=($objCups_pnp->codigo_ipress."-".$objCups_pnp->año ."-". $objCups_pnp->intramural_extramural 
+    ."-". $objCups_pnp->no_referidos_referidos ."-". $objCups_pnp->tipo_atencion ."-". str_pad($request->id, 9, '0', STR_PAD_LEFT)) ;
+
+    
+    $model_add_emergencia->cups_pnp = $valor_cups_pnp;
+  ///AGREGAMOS CUPS PNP PARA LA TABLA DE EMERGENCIA AGREGAMOS CUPS PNP PARA LA TABLA DE EMERGENCIA/// 
+  
+    $model_add_emergencia->numero_boleta = $request->numero_boleta;
+    $model_add_emergencia->numero_documento_coronel_guardia = $numero_documento_coronel_guardia;
+    
+    $model_add_emergencia->cod_siteds_susalud = $request->cod_siteds_susalud;
+    $model_add_emergencia->updated_at_cod_siteds = Carbon::now();
+    $model_add_emergencia->updated_us_cod_siteds = Auth::user()->id;
+    $model_add_emergencia->save(); 
+    //FIN DE ACTUALIZA id_tipo_parentesco
+    $telefono =$request->telefono;
+    $telfconducido =$request->telfconducido;
+    if($telfconducido == '' || $telfconducido == null){
+      $telfconducido =$telefono;
+    }
+
+    if($model_add_emergencia->cod_totem!=null){
+      $objTriaje = new Emergencia();
+      $objTriaje->update_ticket_by_emergencia_codigo_ticket(($model_add_emergencia->cod_totem));
+    }
+      
+    $objTicket=\App\Models\Ticket::where('id_emergencia_a', '=', $request->id)->first(); 
+    if($objTicket!=null){
+      $objTicket->id_estado_tv = 3;
+      $objTicket->estado_llamada = 1; 
+
+      $objTicket->flag_admision = 1; 
+      $objTicket->atendido_at = Carbon::now();
+      $objTicket->atendido_us = Auth::user()->id;
+      $objTicket->llamado_at = null;
+      $objTicket->llamado_us = null;
+      $objTicket->anulado_at = null;
+      $objTicket->anulado_us = null;
+      $objTicket->seleccionado_at = null;
+      $objTicket->seleccionado_us = null; 
+      $objTicket->save();
+    } 
+
+    $id_admision_emergencia = $model_admision_emergencia->RegistrarAdmisionEmergencia(
+      $request->id_forma_ingreso, 
+      $request->id_estado_ingreso,
+      $request->id_categoria, 
+      $request->Departamento, 
+      $request->Provincia, 
+      $request->Distrito, 
+      $request->dni_conducido, 
+      $request->conducido, 
+      $request->id_tipo_beneficiario, 
+      $telfconducido, 
+      $request->observacion_admision, 
+      $oficial_guardia, 
+      $request->direccion_referencial, 
+      $telefono, 
+      $request->id, 
+      $request->id_asegurado, 
+      $id_departamento_evac,  
+      $request->numero_oficio, 
+      $id_unidad_policial, 
+      $id_situacion_evac, 
+      $diagnostico, 
+      $request->observacion_evac, 
+      $id_violencia,  
+      $id_tipo_violencia, 
+      $id_comisaria, 
+      $id_situacion_vio, 
+      $request->fecha_accidente, 
+      $request->hora_accidente, 
+      $dpto_vio, 
+      $prov_vio, 
+      $dist_vio, 
+      $request->lugar_accidente, 
+      $id_unidad_vio, 
+      $id_user, 
+      $id_establecimiento,
+      $request->id_parentesco, 
+      $request->tipodoc_conducido);
+       
+
+
+      if (isset($request->id_diagnostico)) {
+        foreach ($request->id_diagnostico as $key => $value) : 
+          if ($request->id_diagnostico[$key] != "") { 
+            $r_diagnostico = new Receta_diagnostico();
+            $r_diagnostico->id_diagnostico = $request->id_diagnostico[$key]; 
+            $r_diagnostico->id_tipo_diagnostico =  $request->id_tipo_diagnostico[$key];
+            $r_diagnostico->estado = '1'; 
+            $r_diagnostico->id_emergencia = $request->id; 
+            $r_diagnostico->save(); 
+          }
+        endforeach; 
+      }
+    
+
+    Session::flash('flash_message', 'Registro exitosa');
+    return redirect('/ver_datos_admision/'.$id_admision_emergencia.'/2/');
+  }
+
+
+  public function all_triajes_atendidas_by_emergencia($id_user = 0)
+  {
+    $model_medico = new \App\Models\Medico();
+    $model_usuario = new User;
+    if (!Auth::check()) :
+      return redirect('/auth/login');
+    else:
+      if(Auth::user()->actualizo_passw==0):
+        return redirect('auth/password/change');
+      endif;
+    endif;
+    
+    //1 PRESCRIPTOR MEDICO
+    //8 PROFESIONAL DE ARCHIVOS
+    //VALIDAMO QUE SEA PRESCRIPTOR MEDICO Y   PROFESIONAL DE ARCHIVOS QUE ES EL TIPO 1
+    if(Auth::user()->tipo_registro == 1 || Auth::user()->tipo_registro == 8){
+
+    }else{
+      Session::flash('flash_message', 'Sólo los médicos pueden registrar triaje');
+      return redirect('/');
+    }
+    //VALIDAMO QUE SEA PRESCRIPTOR MEDICO Y   PROFESIONAL DE ARCHIVOS QUE ES EL TIPO 1
+
+    $ruta = Route::getCurrentRoute()->getPath();
+    if (count($ruta = explode("/", $ruta)) > 1);
+    $ruta = $ruta[0];
+    if ($ruta == "listar_triaje_emergencia_ajax");
+    $ruta = "all_triajes_atendidas_by_emergencia";
+    $menu = \App\Models\Menu::getMenuByUsuario(Auth::user()->id, $ruta);
+    $permiso = $menu[0];
+    if ($permiso->lectura == "")
+      return redirect('/inicio')->withFlashSuccess("No tiene Permiso para ingresar a la url ingresada");
+    $id_user = Auth::user()->id;
+    $usuario_actual = $model_usuario->GetById($id_user);
+    $flagemergenciareferencia = $usuario_actual->flaghistoria;
+
+
+    $date = Carbon::now();
+    $fechaHasta = $date->format('d-m-Y');
+    $fechaDesdex = $date->format('d-m-Y');
+    $fechaDesdey = strtotime('-1 day', strtotime($fechaDesdex));
+    $fechaDesde = date('d-m-Y', $fechaDesdey);
+
+    //====================
+    $model_farma = new Farmacia();
+    $farmacia = $model_farma->GetFarmaByUser($id_user);
+    $id_farmacia = $farmacia->id;
+    $modo_validacion = $farmacia->modo_validacion;
+
+    $dni_beneficiario = '';
+    $nombre_beneficiario = '';
+    $estado = 1;
+    $opcion = 'admision';
+    
+    $model_establecimiento = new Establecimiento;
+    $establecimiento = $model_establecimiento->Get(Auth::user()->id_establecimiento);
+    
+
+    return view('frontend.admision.emergencia.all_triajes_atendidas_by_emergencia', 
+    compact('farmacia', 'fechaDesde', 'fechaHasta', 'dni_beneficiario', 'nombre_beneficiario', 'estado', 'opcion','establecimiento'));
+  }
+
+  public function listar_triaje_emergencia_ajax(Request $request)
+  { 
+    $model_emergencias = new Emergencia();
+    $p[] = Auth::user()->id_establecimiento;
+    $p[] = $request->fecha_ini;
+    $p[] = $request->fecha_fin;
+    $p[] = $request->dni_beneficiario;
+    $p[] = strtoupper($request->nombre_beneficiario);
+    $p[] = $request->estado;
+    $p[] = $request->NumeroPagina;
+    $p[] = $request->NumeroRegistros;
+    $p[] = $request->opcion;
+    $data = $model_emergencias->listar_triaje_emergencia_ajax($p);
+    
+    if($request->estado == -1 || $request->estado == -2){
+
+      $iTotalDisplayRecords = isset($data['totalrows']) ? $data['totalrows'] : 0; 
+      
+      $result["PageStart"] = $request->NumeroPagina;
+      $result["pageSize"] = $request->NumeroRegistros;
+      $result["SearchText"] = "";
+      $result["ShowChildren"] = true;
+      $result["iTotalRecords"] = $iTotalDisplayRecords;
+      $result["iTotalDisplayRecords"] = $iTotalDisplayRecords;
+      $result["aaData"] = $data['data']; 
+      echo json_encode($result);
+
+    }else{
+
+      $iTotalDisplayRecords = isset($data[0]->totalrows) ? $data[0]->totalrows : 0;
+      $result["PageStart"] = $request->NumeroPagina;
+      $result["pageSize"] = $request->NumeroRegistros;
+      $result["SearchText"] = "";
+      $result["ShowChildren"] = true;
+      $result["iTotalRecords"] = $iTotalDisplayRecords;
+      $result["iTotalDisplayRecords"] = $iTotalDisplayRecords;
+      $result["aaData"] = $data;
+      //dd($data);
+      echo json_encode($result);
+    }
+  }
+
+  public function listar_triaje_emergencia_ajax2($fecha_ini, $fecha_fin, $id_establecimiento, $dni_beneficiario, $nombre_beneficiario, $NumeroPagina, $NumeroRegistros)
+  {
+
+    $model_emergencias = new Emergencia();
+    $p[] = $id_establecimiento;
+    $p[] = $fecha_ini;
+    $p[] = $fecha_fin;
+    $p[] = $dni_beneficiario;
+    $p[] = strtoupper($nombre_beneficiario);
+    $p[] = $NumeroPagina;
+    $p[] = $NumeroRegistros;
+    $data = $model_emergencias->listar_triaje_emergencia_ajax($p);
+    $iTotalDisplayRecords = isset($data[0]->totalrows) ? $data[0]->totalrows : 0;
+    $result["PageStart"] = $NumeroPagina;
+    $result["pageSize"] = $NumeroRegistros;
+    $result["SearchText"] = "";
+    $result["ShowChildren"] = true;
+    $result["iTotalRecords"] = $iTotalDisplayRecords;
+    $result["iTotalDisplayRecords"] = $iTotalDisplayRecords;
+    $result["aaData"] = $data;
+    echo json_encode($result);
+  }
+
+  public function desactivar($id, $estado)
+  {
+
+    if (!Auth::check()) :
+      return redirect('/auth/login');
+    endif;
+
+    $id_user = Auth::user()->id;
+    if ($estado == "1") {
+      $update = Emergencia::where('id', '=', $id)->first();
+      $update->estado = 3;
+      $update->save();
+      Session::flash('flash_message', 'Se desactivo correctamente');
+    } else {
+      $update = Emergencia::where('id', '=', $id)->first();
+      $update->estado = 1;
+      $update->save();
+      Session::flash('flash_message', 'Se activo correctamente');
+    }
+  }
+
+  public function cerrar_emergencia_triaje($id)
+  {
+
+    if (!Auth::check()) :
+      return redirect('/auth/login');
+    endif;
+
+    $anular = Emergencia::where('id', $id)->first();
+    $anular->estado = 4;
+    $anular->save();
+
+    $array["sw"] = true;
+    echo json_encode($array);
+  }
+
+  public function atender_admision($id, $estado)
+  { 
+    if (!Auth::check()) :
+      return redirect('/auth/login');
+    endif; 
+ 
+    //1 PRESCRIPTOR MEDICO
+    //8 PROFESIONAL DE ARCHIVOS
+    //VALIDAMO QUE SEA PRESCRIPTOR MEDICO Y   PROFESIONAL DE ARCHIVOS QUE ES EL TIPO 1
+    if(Auth::user()->tipo_registro == 1 || Auth::user()->tipo_registro == 8){
+
+    }else{
+      Session::flash('flash_message', 'Sólo los médicos pueden registrar triaje');
+      return redirect('/');
+    }
+    //VALIDAMO QUE SEA PRESCRIPTOR MEDICO Y   PROFESIONAL DE ARCHIVOS QUE ES EL TIPO 1				
+
+    $model_farma = new \App\Models\Farmacia;
+    $farma = $model_farma->GetFarmaByIdfarma(Auth::user()->id_farmacia);
+    $model_establecimiento = new \App\Models\Establecimiento;
+    $ipress = $model_establecimiento->find($farma->id_establecimiento);
+    $ipress_codigo = $ipress->codigo;
+
+    $verificar = Emergencia::where('id', $id)->where('estado', $estado)->first();
+    if (is_object($verificar)) :
+      $model_emergencias = new Emergencia;
+      $admision_emergencia = $model_emergencias->GetBuscaEmergenciaTriaje($id,$estado); 
+      //dd($admision_emergencia );
+      
+      $model_triaje = new Triaje;
+      $model_upss = new Upss;
+      //====VALIDAR CÓDIGO DE UPSS POR PRIORIDAD Y SERVICIO====//
+      //dd($admision_emergencia->id_triaje);
+      $triaje = $model_triaje->getConsultorioPorIdTriaje_TODO($admision_emergencia->id_triaje);
+      //dd($triaje[0]);
+      if ($triaje[0]->prioridad !== 4) {
+        //dd($triaje[0]->prioridad); 
+        if ($triaje[0]->id_ups == '' && $admision_emergencia->id_triaje==12) {
+          $upss = '230600';
+          $descripcion_upss ='UNIDAD DE VIGILANCIA INTENSIVA (UVI)';
+        }else{
+          $r_upss = $model_upss->upss_by_id($triaje[0]->id_ups,2);
+          $upss = $r_upss->codigo == '' ? 'S/N' : $r_upss->codigo;
+          $descripcion_upss = $r_upss->descripcion_upss == '' ? '-' : $r_upss->descripcion_upss;
+        }
+      } else {
+        $r_upss = '230200';
+        $upss = $r_upss;
+        $descripcion_upss ='CONSULTORIO DE ATENCIÓN RÁPIDA (CAR)';
+      } 
+      //======================================================
+      //$admision_emergencia->id_triaje
+
+      $model_distrito = new  Distrito;
+      //dd($admision_emergencia);
+      //$data_violencia = ($admision_emergencia->violencia != null) ? json_decode($admision_emergencia->violencia)[0] : null;
+      //$data_evacuado = ($admision_emergencia->evacuado != null) ? json_decode($admision_emergencia->evacuado)[0] : null;
+
+      if ($admision_emergencia->violencia != null) {
+        $data_violencia = json_decode($admision_emergencia->violencia)[0];
+        $model_tipoviolencia = new Violencia;
+        $modoviolencia = $model_tipoviolencia->showTipo_violencia($data_violencia->id_violencia);//TIPO VIOLENCIA - MODALIDAD
+        $provincia_violencia = $model_distrito->ShowProvincia($data_violencia->id_dpto);
+        $distrito_violencia = $model_distrito->ShowDistrito($data_violencia->id_prov);
+
+      } else {
+        $data_violencia["id_emergencia_violencia"]=null;
+        $data_violencia["id_violencia"]='';
+        $data_violencia["id_modalidad"]='';
+        $data_violencia["id_comisaria"]='';
+        $data_violencia["id_situacion"]='';
+        $data_violencia["fecha_accidente"]='';
+        $data_violencia["hora_accidente"]='';
+        $data_violencia["id_dpto"]='';
+        $data_violencia["id_prov"]='';
+        $data_violencia["id_dist"]='';
+        $data_violencia["lugar_accidente"]='';
+        $data_violencia["id_unidad"]='';
+        $data_violencia["id_emergencia"]='';
+        $data_violencia = json_decode(json_encode($data_violencia));
+        $modoviolencia = '';
+        $provincia_violencia = '';
+        $distrito_violencia = '';
+      }
+
+      if ($admision_emergencia->evacuado != null) {
+        $data_evacuado = json_decode($admision_emergencia->evacuado)[0];
+        //dd($data_evacuado);
+        //$model_tipoviolencia = new Violencia;
+        //$modoviolencia = $model_tipoviolencia->showTipo_violencia($data_evacuado->id_violencia);
+      } else {
+        //crea un objeto vacio con la estructura de evacuado
+        $data_evacuado['id_evacuado'] = null;
+        $data_evacuado['id_emergencia'] = '';
+        $data_evacuado['numero_oficio'] = '';
+        $data_evacuado['id_diagnostico'] = '';
+        $data_evacuado['diagnostico'] = '';
+        $data_evacuado['unidad_policial'] = '';
+        $data_evacuado['id_situacion'] = '';
+        $data_evacuado['id_departamento'] = '';
+        $data_evacuado['observacion'] = '';
+
+        $data_evacuado = json_decode(json_encode($data_evacuado));
+      }
+
+      /*
+      $model_forma_ingreso = new Forma_ingreso;
+      $forma_ingreso = $model_forma_ingreso->ShowForma_ingreso();
+
+      $model_estado_ingreso = new Estado_ingreso;
+      $estado_ingreso = $model_estado_ingreso->ShowEstado_ingreso();
+
+      $model_categoria = new Categoria;//! MOTIVO DE INGRESO
+      $categoria = $model_categoria->ShowCategoria();
+      */
+
+      $departamento = $model_distrito->ShowDepartamento();
+      
+      if($admision_emergencia->id_departamento_paciente){
+
+        $provincia = $model_distrito->ShowProvincia($admision_emergencia->id_departamento_paciente);
+        if($provincia){
+          if($admision_emergencia->id_provincia_paciente!=null){
+            $distrito = $model_distrito->ShowDistrito($admision_emergencia->id_provincia_paciente); 
+            if($distrito==null){ 
+              $distrito ='';
+            }
+          }else{
+            $distrito ='';
+          }
+        }else{
+          $provincia ='';
+          $distrito ='';
+        }
+
+      }else{
+        $provincia ='';
+        $distrito ='';
+      }
+
+      $departamento_violencia = $model_distrito->ShowDepartamento();
+      
+      $model_est = new Establecimiento;
+      $establecimiento = $model_est->GetById(Auth::user()->id_establecimiento);
+      $nombre_establecimiento = $establecimiento[0]->nombre;
+
+      $model_kardex = new Kardexe();//!FECHA DE REGISTRO
+      $fechaServidor = $model_kardex->getFechaServidor();
+
+      $model_violencia = new Violencia;//! TIPO DE VIOLENCIA
+      $violencia = $model_violencia->ShowViolencia();
+
+      $model_comisaria = new Comisaria;
+      $comisaria = $model_comisaria->ShowComisaria();
+
+      $model_situacion = new Situacion;
+      $situacion = $model_situacion->ShowSituacion();
+ 
+      $model_unidad = new Unidadpago;
+      $unidad = $model_unidad->ShowUnidadpago();
+
+      $ipress = $model_est->ShowAllEstablecimientos();
+
+      $model_diagnostico = new Diagnostico();
+      $diagnosticos = $model_diagnostico->ShowDiagnosticos();
+
+      $model_tipo_beneficiario = new Tipo_beneficiario;
+      $tipo_beneficiario = $model_tipo_beneficiario->ShowTipo_beneficiario();
+
+      $date = Carbon::now();
+      $hora=$date->toTimeString(); 
+
+      if($hora>'01:30' & $hora<'07:31'):
+        /*echo*/ $turno='MD';
+      else:
+        if($hora>'07:30' & $hora<'13:31'):
+          /*echo*/ $turno='M';
+        else:
+          if($hora>'13:30' & $hora<'19:31'):
+            /*echo*/ $turno='T';
+          else:
+            if($hora>'19:30' & $hora<='23:59'):
+              /*echo*/ $turno='N';
+            else:
+              if($hora>='00:00' & $hora<='01:31'):
+                /*echo*/ $turno='N';
+              endif;
+            endif;
+          endif;
+        endif;
+      endif; 
+
+      $model_guardia = new Medico_turno;
+      $id_consultorio = empty($admision_emergencia->id_servicio) ? '' : $admision_emergencia->id_servicio;
+      $personal_guardia = $model_guardia->GetMedicoByIdIpressAndIdConsultorioAndTurnoEmergenciaNew(Auth::user()->id_establecimiento, $turno, $fechaServidor);
+      //$personal_guardia = $model_guardia->GetMedicoByIdIpressAndIdConsultorioAndTurnoEmergencia(Auth::user()->id_establecimiento, 76, $turno, $fechaServidor);
+       
+      $objAsegurado = \App\Models\Paciente::find($verificar->id_asegurado);  
+      $model_tipo_parentescos = new Tipo_parentescos; 
+      $tipo_parentesco =$model_tipo_parentescos->getTipo_parentescos(); 
+      $situacion_paciente=null;
+      if($objAsegurado->situacion_paciente!=null){
+        $situacion_paciente =  $model_situacion->BuscaSituacion($objAsegurado->situacion_paciente); 
+      }else{
+        
+        if ( $objAsegurado->id_tipo_doc_ident == "1") { 
+          //datos de Saludpol
+          $Saludpol = new \App\Ws\Saludpol;
+          $result = $Saludpol->BuscarTitularFamiliar(1, $objAsegurado->nro_doc_ident, ''); 
+          if (isset($result->cip)) {   
+            $objAsegurado_upda = \App\Models\Paciente::find($verificar->id_asegurado); 
+            $objAsegurado_upda->situacion_paciente = $result->situacion; 
+            $objAsegurado_upda->save();
+
+            $situacion_paciente =  $model_situacion->BuscaSituacion($result->situacion); 
+          }else{    
+            
+            $situacion_paciente =  $model_situacion->BuscaSituacion('CIVIL');
+          }
+        }
+      }  
+        
+      $datos_emergencia = DB::table('emergencias')
+            ->where('id', $id)
+          ->first();
+          if($datos_emergencia->id_referencia != 0){
+            $dato_referencia =  DB::table('referencias')
+                                ->where('id', $datos_emergencia->id_referencia)
+                                ->first();
+            $ipress = "SELECT * from establecimientos where id = '$dato_referencia->id_establecimiento' ";
+            $ipress = DB::select($ipress);
+          }
+
+      //dd($situacion_paciente);
+      return view('frontend.admision.emergencia.form_admision', 
+      compact('admision_emergencia',/* 'forma_ingreso', 'estado_ingreso', 'categoria',*/ 'ipress_codigo', 'departamento', 'provincia','distrito',
+      'nombre_establecimiento', 'fechaServidor', 'violencia', 'comisaria','descripcion_upss',  'situacion', 'unidad', 'diagnosticos', 
+      'modoviolencia', 'personal_guardia', 'data_violencia', 'data_evacuado','departamento_violencia','provincia_violencia',
+      'distrito_violencia','ipress','upss','tipo_parentesco','objAsegurado','situacion_paciente' ));
+    else :
+      
+      $model_add_emergencia = Emergencia::where('id', '=', $id)->first();
+      $ticket=\App\Models\Ticket::where('id', '=', $model_add_emergencia->id_ticket_admision)->first();   
+      if($ticket){
+        $ticket->anulado_at = Carbon::now();
+        $ticket->anulado_us = Auth::user()->id;
+        $ticket->llamado_at = null;
+        $ticket->llamado_us = null;
+        $ticket->seleccionado_at = null;
+        $ticket->seleccionado_us = null;
+        $ticket->atendido_at = null;
+        $ticket->atendido_us = null;
+        $ticket->ventanilla = null;    
+        $ticket->id_estado_tv = 2;
+        $ticket->estado_llamada = 0;  
+        $ticket->save();
+      } 
+      
+      return redirect('/all_triajes_atendidas_by_emergencia/')->withInput()->withErrors(array('Elemento no encontrado ..!'));
+    endif;
+  }
+
+  public function nueva_admision()
+  {
+
+    if (!Auth::check()) :
+      return redirect('/auth/login');
+    endif;
+
+    $model_forma_ingreso = new Forma_ingreso;
+    $forma_ingreso = $model_forma_ingreso->ShowForma_ingreso();// select - forma de ingreso
+
+    $model_estado_ingreso = new Estado_ingreso;
+    $estado_ingreso = $model_estado_ingreso->ShowEstado_ingreso();
+
+    $model_distrito = new  Distrito;
+    $departamento = $model_distrito->ShowDepartamento();
+
+    $model_est = new Establecimiento;
+    $establecimiento = $model_est->GetById(Auth::user()->id_establecimiento);
+    $nombre_establecimiento = $establecimiento[0]->nombre;
+
+    $model_kardex = new Kardexe();
+    $fechaServidor = $model_kardex->getFechaServidor();
+
+    $model_categoria = new Categoria;
+    $categoria = $model_categoria->ShowCategoria();
+
+    $model_violencia = new Violencia;
+    $violencia = $model_violencia->ShowViolencia();
+
+    $model_tipoviolencia = new TipoViolencia;
+    $modoviolencia = $model_tipoviolencia->ShowTipoViolencia();
+
+    $model_comisaria = new Comisaria;
+    $comisaria = $model_comisaria->ShowComisaria();
+
+    $model_situacion = new Situacion;
+    $situacion = $model_situacion->ShowSituacion();
+
+    $model_unidad = new Unidadpago;
+    $unidad = $model_unidad->ShowUnidadpago();
+
+    $model_diagnostico = new Diagnostico();
+    $diagnosticos = $model_diagnostico->ShowDiagnosticos();// duplicado  
+
+    $model_diagnostico = new Diagnostico();
+    $diagnosticos = $model_diagnostico->ShowDiagnosticos();
+
+    $model_tipo_beneficiario = new Tipo_beneficiario;
+    $tipo_beneficiario = $model_tipo_beneficiario->ShowTipo_beneficiario();
+
+    if($hora>'01:30' & $hora<'07:31'):
+        /*echo*/ $turno='MD';
+      else:
+        if($hora>'07:30' & $hora<'13:31'):
+          /*echo*/ $turno='M';
+        else:
+          if($hora>'13:30' & $hora<'19:31'):
+            /*echo*/ $turno='T';
+          else:
+            if($hora>'19:30' & $hora<='23:59'):
+              /*echo*/ $turno='N';
+            else:
+              if($hora>='00:00' & $hora<='01:31'):
+                /*echo*/ $turno='N';
+              endif;
+            endif;
+          endif;
+        endif;
+      endif;
+
+      $model_guardia = new Medico_turno;
+      $personal_guardia = $model_guardia->GetMedicoByIdIpressAndIdConsultorioAndTurnoEmergencia(Auth::user()->id_establecimiento, $admision_emergencia->id_servicio, $turno, $fechaServidor);
+    
+    //FALTA CREAR VISTA
+    return view('frontend.admision.emergencia.form_admision_nuevo', compact('forma_ingreso', 'estado_ingreso', 'departamento', 'nombre_establecimiento', 'fechaServidor', 'categoria', 'violencia', 'comisaria', 'situacion', 'unidad', 'diagnosticos', 'tipo_beneficiario', 'modoviolencia', 'personal_guardia'));
+  }
+
+  public function all_admisiones_atendidas_by_emergencia($id_user = 0)
+  {
+    $model_medico = new \App\Models\Medico();
+    $model_usuario = new User;
+    if (!Auth::check()) :
+        return redirect('/auth/login');
+    else:
+      if(Auth::user()->actualizo_passw==0):
+        return redirect('auth/password/change');
+      endif;
+    endif;
+
+    $ruta = Route::getCurrentRoute()->getPath();
+    if (count($ruta = explode("/", $ruta)) > 1);
+    $ruta = $ruta[0];
+    if ($ruta == "listar_triaje_emergencia_ajax");
+    $ruta = "all_admisiones_atendidas_by_emergencia";
+    $menu = \App\Models\Menu::getMenuByUsuario(Auth::user()->id, $ruta);
+    $permiso = $menu[0];
+    if ($permiso->lectura == "")
+      return redirect('/inicio')->withFlashSuccess("No tiene Permiso para ingresar a la url ingresada");
+    if (Auth::user()->tipo_registro == 1) {
+    $id_user = Auth::user()->id;
+    $usuario_actual = $model_usuario->GetById($id_user);
+    $flagemergenciareferencia = $usuario_actual->flaghistoria;
+
+    $date = Carbon::now();
+    $fechaHasta = $date->format('d-m-Y');
+    $fechaDesde = $date->format('d-m-Y');
+
+    //====================
+    $model_farma = new Farmacia();
+    $farmacia = $model_farma->GetFarmaByUser($id_user);
+    $id_farmacia = $farmacia->id;
+    $modo_validacion = $farmacia->modo_validacion;
+
+    $dni_beneficiario = '';
+    $nombre_beneficiario = '';
+    $estado = 2;
+    $opcion = 'atencion';
+    $model_emergencias = new Emergencia;
+    $opcionesprioridad = $model_emergencias->listarPrioridades(); 
+    $id_prestacion_buscar = '';
+
+    $date = Carbon::now();
+    $hora_ini = "00:00";
+    $hora_fin = $date->format('H:i');
+    
+    return view('frontend.admision.emergencia.all_admisiones_atendidas_by_emergencia', compact('opcionesprioridad','farmacia', 'fechaDesde', 'fechaHasta', 'dni_beneficiario', 'nombre_beneficiario', 'estado','opcion','permiso','hora_ini','hora_fin','id_prestacion_buscar'));
+  }
+    else{
+      return redirect('/dashboard')->withInput()->withErrors(array('No tiene el perfil de médico..!'));
+    }
+  }
+
+  public function listar_admision_emergencia_ajax(Request $request)
+  {
+
+    $model_emergencias = new Emergencia();
+    $p[] = Auth::user()->id_establecimiento;
+    $p[] = $request->fecha_ini;
+    $p[] = $request->fecha_fin;
+    $p[] = $request->dni_beneficiario;
+    $p[] = $request->nombre_beneficiario;
+    $p[] = $request->estado;
+    $p[] = $request->NumeroPagina;
+    $p[] = $request->NumeroRegistros;
+    $data = $model_emergencias->listar_admision_emergencia_ajax($p);
+    $iTotalDisplayRecords = isset($data[0]->totalrows) ? $data[0]->totalrows : 0;
+    $result["PageStart"] = $request->NumeroPagina;
+    $result["pageSize"] = $request->NumeroRegistros;
+    $result["SearchText"] = "";
+    $result["ShowChildren"] = true;
+    $result["iTotalRecords"] = $iTotalDisplayRecords;
+    $result["iTotalDisplayRecords"] = $iTotalDisplayRecords;
+    $result["aaData"] = $data;
+    echo json_encode($result);
+  }
+
+  public function listar_tipo_emergencia_ajax(Request $request)
+  {
+    $model_tipo_violencia = new TipoViolencia();
+    $data = $model_tipo_violencia->BuscarTipoViolenciaIdViolencia($request->id_violencia);
+    return json_encode($data);
+  }
+
+  public function listar_triaje_emergencia_atendidos(Request $request){
+         
+      $model_emergencias = new Emergencia();
+      $data = $model_emergencias->ListarTriajesAtendidos(
+        $request->id_establecimiento, 
+        $request->fecha_ini, 
+        $request->fecha_fin, 
+        $request->dni_beneficiario, 
+        $request->nombre_beneficiario, 
+        $request->estado_triaje ,
+        $request->NumeroPagina, 
+        $request->NumeroRegistros
+      ); 
+      //$iTotalDisplayRecords = isset($data) ? count($data) : 0; 
+      $iTotalDisplayRecords = isset($data['totalrows']) ? $data['totalrows'] : 0; 
+      
+      $result["PageStart"] = $request->NumeroPagina;
+      $result["pageSize"] = $request->NumeroRegistros;
+      $result["SearchText"] = "";
+      $result["ShowChildren"] = true;
+      $result["iTotalRecords"] = $iTotalDisplayRecords;
+      $result["iTotalDisplayRecords"] = $iTotalDisplayRecords;
+      $result["aaData"] = $data['data'];
+      echo json_encode($result);
+      
+  }
+
+  public function listar_emergencia_atenciones_repo(Request $request){  
+      $model_emergencias = new EmergenciaReporte();
+      $data = $model_emergencias->ListarTriajesAtendidosRepo(
+        $request->id_establecimiento, 
+        $request->fecha_ini, 
+        $request->fecha_fin, 
+        $request->dni_beneficiario, 
+        $request->nombre_beneficiario, 
+        $request->estado_triaje , 
+        $request->ubicacion , 
+        $request->id_prioridad , 
+        $request->id_topico ,
+        $request->id_motivo_ingreso ,
+        $request->id_tipo_violencia , 
+        $request->edad_desde , 
+        $request->edad_hasta , 
+        'consultar',
+        $request->NumeroPagina, 
+        $request->NumeroRegistros
+      );
+      //$iTotalDisplayRecords = isset($data) ? count($data) : 0; 
+      $iTotalDisplayRecords = isset($data['totalrows']) ? $data['totalrows'] : 0; 
+      
+      $result["PageStart"] = $request->NumeroPagina;
+      $result["pageSize"] = $request->NumeroRegistros;
+      $result["SearchText"] = "";
+      $result["ShowChildren"] = true;
+      $result["iTotalRecords"] = $iTotalDisplayRecords;
+      $result["iTotalDisplayRecords"] = $iTotalDisplayRecords;
+      $result["aaData"] = $data['data'];
+      echo json_encode($result);
+      
+  }
+
+  public function update_emergencia_triaje(Request $request) {
+    $estado = null;
+    $id_topico_generado = null; 
+    if ($request->prioridadSeleccionada == "4") { 
+        $estado = 3; 
+        $id_topico_generado = $request->topicoSeleccionado; 
+    } else {  
+        $estado = 1; 
+        $id_topico_generado = $request->topicoSeleccionado;
+    }
+    $modelEmergencia = Emergencia::where('id', '=', $request->id_emergencia)->first(); 
+    $modelEmergencia->id_prioridad              = $request->prioridadSeleccionada;
+    $modelEmergencia->id_triaje                 = $id_topico_generado;
+    $modelEmergencia->observacion_triaje        = $request->observacionSeleccionado;
+    $modelEmergencia->estado                    = $estado;
+    $modelEmergencia->temperatura               = $request->temperatura;
+    $modelEmergencia->sa02_porcentaje           = $request->sa02_porcentaje;
+    $modelEmergencia->presion_arterial_x        = $request->presion_arterial_x;
+    $modelEmergencia->presion_arterial_y        = $request->presion_arterial_y;
+    $modelEmergencia->talla_cm                  = $request->talla;
+    $modelEmergencia->tamano_cintura_cm         = $request->tamano_cintura_cm;
+    $modelEmergencia->frecuencia_respiratoria   = $request->frecuencia_respiratoria;
+    $modelEmergencia->peso_kg                   = $request->peso;
+    $modelEmergencia->frecuencia_cardiaca_fetal = $request->frecuencia_cardiaca_fetal;
+    $modelEmergencia->frecuencia_cardiaca       = $request->frecuencia_cardiaca;
+    $modelEmergencia->fi02                      = $request->fi02;
+    $modelEmergencia->id_forma_ingreso          = $request->id_forma_ingreso;
+    $modelEmergencia->id_estado_ingreso         = $request->id_estado_ingreso;
+    $modelEmergencia->id_motivo_ingreso         = $request->id_motivo_ingreso;
+    $modelEmergencia->es_gestante               = $request->es_gestante;
+    
+    
+    $date = Carbon::now();
+    $fechaActual = $date->format('d-m-Y');
+    $horaActual = $date->format('H:i:s');
+    if($request->fecha_registro_ingreso==''||$request->fecha_registro_ingreso==null){
+      $fecha_registro_ingreso = $fechaActual;
+    }else{ 
+      $fecha_registro_ingreso = $request->fecha_registro_ingreso ;
+    } 
+    if($request->hora_registro_ingreso==''||$request->hora_registro_ingreso==null){
+      $hora_registro_ingreso = $horaActual;
+    }else{ 
+      $hora_registro_ingreso = $request->hora_registro_ingreso ;
+    }  
+    $registro_manual = $request->registro_manual ;
+    
+    $modelEmergencia->fecha_registro_ingreso    = $fecha_registro_ingreso;
+    $modelEmergencia->hora_registro_ingreso     = $hora_registro_ingreso;
+    $modelEmergencia->registro_manual           = $registro_manual;
+    $modelEmergencia->updated_at                = Carbon::now();
+    $modelEmergencia->save(); 
+
+    
+    $objAseguradoEdit = \App\Models\Paciente::where('id', '=', $request->id_asegurado)->first(); 
+    if($request->foto_paciente!=null){
+      $objAseguradoEdit->foto    = $request->foto_paciente; 
+    }
+    if($request->codigo_ubig!=null && $request->id_departamento!=null &&
+      $request->id_provincia!=null && $request->id_distrito!=null &&
+      $request->direccionDomicilio!=null){
+      $objAseguradoEdit->codigo_ubig    = $request->codigo_ubig; 
+      $objAseguradoEdit->id_departamento    = $request->id_departamento; 
+      $objAseguradoEdit->id_provincia    = $request->id_provincia; 
+      $objAseguradoEdit->id_distrito    = $request->id_distrito; 
+      $objAseguradoEdit->domicilio    = $request->direccionDomicilio;  
+    }   
+    $objAseguradoEdit->save();  
+
+    Session::flash('flash_message', 'Se actualizó correctamente el Triaje.');
+    return redirect('/edit_emergencia_triaje/' . $request->id_emergencia); 
+  }
+  
+  public function formulario_atencion_emergencia($id_emergencia)
+    {
+        if (!Auth::check()) :
+            return redirect('/auth/login');
+        endif;
+
+        $id_principal = $id_emergencia;
+
+        $verificar =  Emergencia::where('id', $id_emergencia)->first();
+
+        if($verificar->id_referencia != 0){
+          $model_referencia = new \App\Models\Referencia;
+          $referencia = $model_referencia->GetBuscaReferenciaById($verificar->id_referencia);
+          $medico_referencia = DB::table('medicos')
+          ->select('medicos.*')
+          ->where('id', $referencia->id_medico_referencia)
+          ->first();
+          $nombre_medico_referencia = $medico_referencia->paterno. ' '. $medico_referencia->materno. ','.$medico_referencia->nombre;
+          $model_prestacionreferncia = new \App\Models\Prestaciones;
+          $diagnostico_prestacion_referencia = $model_prestacionreferncia->GetDiagnosticoByIdPrestacion($referencia->id_prestacion);
+          $procedimientos_refencia = $model_referencia->buscar_procedimiento_referencia($verificar->id_referencia);
+          $servicios_ipress_origen = $model_referencia->busca_servicio_por_ipres_origen_referencia($referencia->id_establecimiento);
+        
+        }else{
+          $diagnostico_prestacion_referencia = "";
+          $referencia = "";
+          $procedimientos_refencia="";
+          $servicios_ipress_origen="";
+          $nombre_medico_referencia="";
+        }
+
+        $valida_atencion = Prestaciones::where('id_ext', $id_emergencia)->where('id_tipo_atencion', 2)->where('id_estado_reg',1)->first();
+        
+        if(is_object($valida_atencion)):
+              return redirect('/all_admisiones_atendidas_by_emergencia/')->withInput()->withErrors(array('Ya existe una prestación registrada, debe anular la prestacion anterior para poder registrar una nueva..!'));
+        endif;          
+        $estado=$verificar->estado;
+        $model_medicos = new Medico;
+        $medico = $model_medicos->GetDatosMedicoByDniAndEstablecimiento(Auth::user()->dni,Auth::user()->id_establecimiento );
+        $id_user = Auth::user()->id;
+        $id_farmacia = Auth::user()->id_farmacia;
+        $model_consultorio = new Consultorio;
+        $model_upss = new Upss;
+
+        $puerperio = null;
+        $gestacion = null;
+
+        if(is_object($verificar)):
+            if(is_object($medico)):
+              if($estado>1 and $estado<4): 
+                $model_emergencias = new Emergencia;
+                $modelfarma= new Farmacia();
+                $modelcama= new Cama();
+                $farmacias=$modelfarma->GetFarmaByUser($id_user);
+                $id_ipress=$farmacias->id_establecimiento;
+                $cita = $model_emergencias->GetBuscaEmergencia($id_emergencia, $medico->id, $estado);
+                /* ------------------Buscando gestacion y/o puerperio de una emergencia------------------- */
+                if ($cita -> id_gestacion != null) {
+                  $gestacion = Gestacion::find($cita -> id_gestacion);
+                  error_log('HAY GESTACION en emergencia: '.((string)$gestacion)); 
+                }
+
+                if ($cita -> id_puerperio != null) {
+                  $puerperio = Puerperio::find($cita -> id_puerperio);
+                  error_log('HAY PUERPERIO en emergencia: '.((string)$puerperio));
+                }
+
+                if($cita->situacion_paciente=='CIVIL'):
+                  return redirect('/all_admisiones_atendidas_by_emergencia/')->withInput()->withErrors(array('Paciente no puede ser atendido, por su condicion de civil ..!'));  
+                endif;
+                
+                //$triaje = $model_emergencias->GetCargarEmergencia($id_emergencia, $estado);
+                $model_kardex = new Kardexe();
+                $fechaServidor = $model_kardex->getFechaServidor();
+                $horaServidor = $model_kardex->getHoraServidor();
+                $date = Carbon::now();
+                $hora = $date->format('H:i'); 
+                $opcionesprioridad = $model_emergencias->listarPrioridades(); 
+                $topicosprioridad = $model_emergencias->listarTriajes();
+                //$camas=$modelcama->ShowallById_Ipress($id_ipress,1); 
+                // $camas=$modelcama->ShowAllCamasXIpress($id_ipress,1); 
+                $cuartos = $modelcama->ShowAllCuartosXIpress($id_ipress,1);
+                $model_farma = new Farmacia();
+                $model_triaje = new Triaje();
+                $farmacia = $model_farma->GetFarmaByIdfarma($id_farmacia);
+            
+                $model_producto = new Producto;
+                $model_establecimiento = new \App\Models\Establecimiento;
+                $establecimiento = $model_establecimiento->GetById($id_ipress);
+                $establecimientos = $model_establecimiento->ShowAllEstablecimientos();
+                $tipo_atencion = $model_farma->GetFarmaciaTipoAtencionByIdFarmacia($id_farmacia);
+                
+                $id_ipress = $farmacia->id_establecimiento;
+                if ($id_ipress == 1) {
+                  $nivel = 2;
+                  $id_farmacia = Auth::user()->id_farmacia;
+                } else {
+                  if($id_ipress==76){
+                    $id_farmacia = 19;
+                  }
+                  else{
+                    $id_farmacia = Auth::user()->id_farmacia;
+                  }
+                  $nivel = $establecimiento[0]->nivel;
+                }
+                
+                $producto = $model_producto->getProductosByNivelAndIdServicio($nivel, $id_ipress, $id_farmacia);
+                
+                $model_consultorio = new Consultorio;
+                $establecimiento_servicios = $model_consultorio->GetServiciosPorEstablecimiento($id_ipress);
+                
+                $farmacias = $model_farma->GetFarmaciaById($id_farmacia);
+                
+                $id_cita=$id_emergencia;
+                $id_tipo_atencione=2;
+                
+                $triaje = $model_triaje->getConsultorioPorIdTriaje_TODO($cita->id_triaje);
+
+                if ($triaje[0]->prioridad !== 4) {
+                  if ($triaje[0]->id_ups == '') {
+                    $codigo_upss = 'S/N';
+                    $descripcion_upss =' ';
+                  }else{
+                    $r_upss = $model_upss->upss_by_id($triaje[0]->id_ups,2);
+                    $codigo_upss = $r_upss->codigo == '' ? 'S/N' : $r_upss->codigo;
+                    $descripcion_upss = $r_upss->descripcion_upss == '' ? '-' : $r_upss->descripcion_upss;
+                  }
+                } else {
+                  $r_upss = '230200';
+                  $codigo_upss = $r_upss;
+                } 
+                $modalidad = 1;
+                $flag = 0 ;
+
+                $id_prioridad = $cita->id_prioridad;
+                $id_topico_triaje = $cita->id_triaje;
+
+                $flag_no_encontrado = 0;  
+                $model_asegurado= new Asegurado();
+                if($cita->id_asegurado_titular!=null || $cita->id_asegurado_titular>0):
+                  $dato_titular = $model_asegurado->Busca_datos_titular($cita->id_asegurado_titular);
+                else:
+                  $flag_no_encontrado=1;
+                endif;
+                
+                  //$emergencia_triaje = DB::select('select * from emergencias e where e.id = 21');
+                  $date = Carbon::now();
+                  $hora=$date->toTimeString(); 
+
+                  if($hora>'01:30' & $hora<'07:31'):
+                    /*echo*/ $turno='MD';
+                  else:
+                    if($hora>'07:30' & $hora<'13:31'):
+                      /*echo*/ $turno='M';
+                    else:
+                      if($hora>'13:30' & $hora<'19:31'):
+                        /*echo*/ $turno='T';
+                      else:
+                        if($hora>'19:30' & $hora<='23:59'):
+                          /*echo*/ $turno='N';
+                        else:
+                          if($hora>='00:00' & $hora<='01:31'):
+                            /*echo*/ $turno='N';
+                          endif;
+                        endif;
+                      endif;
+                    endif;
+                  endif;
+
+                 $model_tipo_parentesco = new Tipo_parentescos;
+                 $tipo_parentesco_obj = $model_tipo_parentesco->getTipo_parentescos_by_id($cita->id_tipo_parentesco); 
+                 $tipo_parentesco=$tipo_parentesco_obj[0]->descripcion;
+
+                 $tipoPartosSql = "SELECT * FROM tipo_partos";
+                 $tipoPartos = DB::select($tipoPartosSql);
+             
+                 $tipoDocsNatiSql = "SELECT * FROM tipo_doc_nati";
+                 $tipoDocsNati = DB::select($tipoDocsNatiSql);
+
+                 $model_prestacion = new Prestaciones;
+                 $asegurado = Asegurado::select('nro_doc_ident')->where('id', $cita -> id_asegurado) -> get();
+                 $last_gestacion = $model_prestacion -> getLastGestacionByDniAseguradoForFormAtencion(implode($asegurado->toArray()[0]));
+
+                $is_profesion_medico = false;
+                switch ($medico->id_profesion) {
+                  case 20: case 4: case 51: case 52: case 1: $is_profesion_medico = true; break;
+                }
+                if (!$is_profesion_medico && (intval($nivel) == 1 || intval($nivel) == 2) && in_array(intval($medico->id_profesion), [12, 2, 5])) {
+                  $is_profesion_medico = true;
+                }
+
+                $client = new SoapClient(env('WI_SALUDPOL_URL') . "/ws/WS_AfiliadoSP_Serv.php?wsdl", array('login' => env('WI_SALUDPOL_USERNAME'), 'password' => env('WI_SALUDPOL_PASSWORD')));
+
+                if($cita->tipo_doc_ident=='DNI'){ 
+                  $tipo_doc_ident = '1';
+                }else if($cita->tipo_doc_ident=='CE'){ 
+                  $tipo_doc_ident = '2';
+                }else if($cita->tipo_doc_ident=='PAS'){ 
+                  $tipo_doc_ident = '3';
+                }else if($cita->tipo_doc_ident=='DIE'){ 
+                  $tipo_doc_ident = '4';
+                }
+
+              $beneficiario = $client->getAseguradoValidate($tipo_doc_ident, $cita->nro_doc_ident);
+
+              if (is_object($beneficiario)) :
+                $flag = 0 ;
+                $errorWS = 1 ;
+              else:
+                $flag = 1 ;
+                $errorWS = 0 ;
+              endif;
+                
+                // Datos del Alta medica
+                // $datos_emergencia = $model_emergencias->GetEmergenciaByIdAseguradoEmergencia($verificar->id_asegurado, $id_emergencia);
+                $dia_estancia = $model_emergencias->GetDiaMayorEstancia($verificar->fecha_registro_ingreso);
+                // $dia_estancia = $datos_emergencia->dia_estancia;
+
+                $consulta_externa = $model_consultorio->ShowConsultorioByIdIpressAndIdTipoAtencion($farmacia->id_establecimiento, 1);
+                // $establecimiento_model = new Establecimiento();
+                $establecimientos_traslado = $model_establecimiento->ShowAll();
+                
+                $upss="SELECT 
+                  concat(u.descripcion_upss,' / ',u.codigo ) as nombre,
+                  u.id as id_upss,
+                  u.codigo as codigo_upss,
+                  c.id as id_consultorio,
+                  c.nombre as nombre_consultorio
+                  from consultorios c 
+                  inner join upsses u on u.id_consultorio = c.id 
+                  where u.id_tipo_atencion = '3' and u.estado = '1' and u.estado = '1' and u.descripcion_upss like 'H%' order by nombre asc";
+                $upss= DB::select($upss);
+
+                $model_cqx_tipo_profesional = new \App\Models\CqxTipoProfesional();
+                $cqx_tipo_profesionales = $model_cqx_tipo_profesional->GetAllActivos();
+                $model_tipo_cirugia = new \App\Models\CqxTipoAnestesia();
+                $tipo_cirugias = $model_tipo_cirugia->GetAllTipoCirugiasActivos();
+                // Fin Datos del Alta medica
+
+                $model_cama = new \App\Models\Cama();
+                $pabellones = $model_cama->GetAllPabellones(Auth::user()->id_establecimiento, 'HOSPITALIZACION');
+
+                return view('frontend.admision.emergencia.form_atencion_emergencia', compact('id_principal','last_gestacion', 'dato_titular','nombre_medico_referencia','verificar','servicios_ipress_origen','diagnostico_prestacion_referencia','referencia','procedimientos_refencia','topicosprioridad','opcionesprioridad','aEscala','fechaServidor', 'horaServidor', 'producto', 'cita', 'gestacion', 'puerperio', 'establecimiento_servicios', 'tipo_atencion', 'farmacias', 'nivel','medico','id_servicio','id_cita','id_tipo_atencione','triaje','establecimientos','codigo_upss','modalidad', 'flag', 'id_prioridad', 'id_topico_triaje','hora','turno','tipo_parentesco','flag_no_encontrado','cuartos', 'tipoPartos', 'tipoDocsNati', 'is_profesion_medico', 'consulta_externa', 'establecimientos_traslado', 'dia_estancia', 'upss', 'cqx_tipo_profesionales', 'tipo_cirugias', 'pabellones', 'id_ipress'));
+              else:
+                return redirect('/all_admisiones_atendidas_by_emergencia/')->withInput()->withErrors(array('Paciente no encontrado, o ya fue dado de alta ..!'));
+              endif;
+            else:
+                if($estado==2):
+                  return redirect('/all_admisiones_atendidas_by_emergencia/')->withInput()->withErrors(array('Medico no encontrado o medico no pertenece a este establecimiento..!'));
+                else:
+                  return redirect('/all_pacientes_observados_by_emergencia/')->withInput()->withErrors(array('Medico no encontrado o medico no pertenece a este establecimiento..!'));
+                endif;
+            endif;
+        else:
+            if($estado==2):
+              return redirect('/all_admisiones_atendidas_by_emergencia/')->withInput()->withErrors(array('Elemento no encontrado ..!'));
+            else:
+              return redirect('/all_pacientes_observados_by_emergencia/')->withInput()->withErrors(array('Elemento no encontrado ..!'));
+            endif;
+        endif;
+    }
+    
+    public function historial_atenciones_emergencia($id, $estado)
+    {
+      $model_emergencias = new Emergencia;
+      $paciente = $model_emergencias->GetBuscaPacienteEmergencia( $id, $estado);
+      $prestaciones = new \App\Models\Prestaciones;
+      $atenciones = $prestaciones->GetAtencionesByDniEmergencia($paciente->nro_doc_ident, $id);
+      return view('frontend.admision.emergencia.historial_atenciones_emergencia', compact('atenciones','paciente'));
+    }
+
+    public function modal_historial_atenciones_emergencia($id_emergencia, $estado)
+    {
+      $model_emergencias = new Emergencia;
+      $paciente = $model_emergencias->GetBuscaPacienteEmergencia( $id_emergencia, $estado);
+      $prestaciones = new \App\Models\Prestaciones;
+      $atenciones = $prestaciones->GetAtencionesByDniEmergencia($paciente->nro_doc_ident, $id_emergencia);
+      return view('frontend.atenciones.modal_historial_atenciones', compact('atenciones'));
+    }
+
+    public function modal_historial_triaje_emergencia($dni_beneficiario)
+    {
+      $model_emergencias = new Emergencia;
+      $atenciones = $model_emergencias->GetBuscaPacienteTriajeEmergencia( $dni_beneficiario);
+      return view('frontend.admision.emergencia.historial_triajes_emergencia', compact('atenciones'));
+    }
+
+
+    //ALTAS
+    public function all_atenciones_by_emergencia($id_user = 0) {
+    $model_medico = new \App\Models\Medico();
+        $model_usuario = new User;
+        if (!Auth::check()) :
+            return redirect('/auth/login');
+        else:
+          if(Auth::user()->actualizo_passw==0):
+            return redirect('auth/password/change');
+          endif;
+        endif;
+
+        $ruta = Route::getCurrentRoute()->getPath();
+        if (count($ruta = explode("/", $ruta)) > 1)
+            ;$ruta = $ruta[0];
+        if($ruta=="listar_triaje_emergencia_ajax");$ruta="all_admisiones_atendidas_by_emergencia";
+        $menu = \App\Models\Menu::getMenuByUsuario(Auth::user()->id, $ruta);
+        $permiso = $menu[0];
+        if ($permiso->lectura == "")
+            return redirect('/inicio')->withFlashSuccess("No tiene Permiso para ingresar a la url ingresada");
+        $id_user = Auth::user()->id;
+        $usuario_actual = $model_usuario->GetById($id_user);
+        $flagemergenciareferencia = $usuario_actual->flaghistoria;
+        
+
+        $date = Carbon::now();
+        $fechaHasta = $date->format('d-m-Y');
+        $fechaDesdex = $date->format('d-m-Y');
+        $fechaDesdey = strtotime('-7 day', strtotime($fechaDesdex));
+        $fechaDesde = date('d-m-Y', $fechaDesdey);
+        
+        //====================
+        $model_farma = new Farmacia();
+        $farmacia = $model_farma->GetFarmaByUser($id_user);
+        $id_farmacia = $farmacia->id;
+        $modo_validacion = $farmacia->modo_validacion;
+
+        $dni_beneficiario='';
+        $nombre_beneficiario='';
+        $estado=4; //3 (atencion)
+        $opcion='alta_medica';
+        $id_tipo_egreso = 0 ;
+        
+        return view('frontend.admision.emergencia.all_atenciones_by_emergencia', compact('farmacia', 'fechaDesde', 'fechaHasta','dni_beneficiario','nombre_beneficiario','estado','opcion','id_tipo_egreso'));
+    }
+
+    public function all_altas_medica_by_emergencia($id_user = 0) {
+    $model_medico = new \App\Models\Medico();
+        $model_usuario = new User;
+        if (!Auth::check()):
+            return redirect('/auth/login');
+        endif;
+
+        $ruta = Route::getCurrentRoute()->getPath();
+        if (count($ruta = explode("/", $ruta)) > 1)
+            ;$ruta = $ruta[0];
+        if($ruta=="listar_triaje_emergencia_ajax");$ruta="all_altas_medica_by_emergencia";
+        $menu = \App\Models\Menu::getMenuByUsuario(Auth::user()->id, $ruta);
+        $permiso = $menu[0];
+        if ($permiso->lectura == "")
+            return redirect('/inicio')->withFlashSuccess("No tiene Permiso para ingresar a la url ingresada");
+        $id_user = Auth::user()->id;
+        $usuario_actual = $model_usuario->GetById($id_user);
+        $flagemergenciareferencia = $usuario_actual->flaghistoria;
+        
+
+        $date = Carbon::now();
+        $fechaHasta = $date->format('d-m-Y');
+        $fechaDesdex = $date->format('d-m-Y');
+        $fechaDesdey = strtotime('-30 day', strtotime($fechaDesdex));
+        $fechaDesde = date('d-m-Y', $fechaDesdey);
+        
+        //====================
+        $model_farma = new Farmacia();
+        $farmacia = $model_farma->GetFarmaByUser($id_user);
+        $id_farmacia = $farmacia->id;
+        $modo_validacion = $farmacia->modo_validacion;
+
+        $dni_beneficiario='';
+        $nombre_beneficiario='';
+        $estado=4; //4 (alta medica)
+        $opcion='alta_admin';
+        
+        return view('frontend.admision.emergencia.all_altas_medica_by_emergencia', compact('farmacia', 'fechaDesde', 'fechaHasta','dni_beneficiario','nombre_beneficiario','estado','opcion'));
+    }
+
+
+    public function ver_emergencia_triaje_modal($id){
+
+      $modelEmergencia = new Emergencia();
+      $data = $modelEmergencia->verEmergenciaTriajeById($id);  
+
+      //--- ESTABLECIMIENTO
+      $id_establecimiento=Auth::user()->id_establecimiento;// id_establecimiento = 76 - 1 mdico  
+      $model_establecimiento = new Establecimiento();
+      $establecimiento=  $model_establecimiento->GetById($id_establecimiento);
+      $nombre_establecimiento = $establecimiento[0]->nombre;
+      //--- -----------
+
+      
+      $datos['data']=$data[0];
+      $datos['nombre_establecimiento']=$nombre_establecimiento;
+      echo json_encode($datos);
+    }
+    public function validar_dato_siteds_emergencia($codigo_siteds){
+
+      $modelEmergencia = new Emergencia();
+      $data = $modelEmergencia->validar_dato_SitedsEmergencia($codigo_siteds);   
+      return json_encode($data);
+    }
+
+    public function ver_emergencia_triaje($id){
+
+      if (!Auth::check()):
+        return redirect('/auth/login');
+      endif;
+
+      $modelEmergencia = new Emergencia();
+      $data = $modelEmergencia->verEmergenciaTriajeById($id);
+      $pendiente_firma = $modelEmergencia->GetDocPendinteFirmarEmergenciaTriajeId($id);
+      
+      $flag_pendinte_firma = (count($pendiente_firma) > 0) ? 1 : 0;
+      
+      //dd($data);
+
+      //--- ESTABLECIMIENTO
+      $id_establecimiento=Auth::user()->id_establecimiento;// id_establecimiento = 76 - 1 mdico  
+      $model_establecimiento = new Establecimiento();
+      $establecimiento=  $model_establecimiento->GetById($id_establecimiento);
+      $nombre_establecimiento = $establecimiento[0]->nombre;
+      //--- -----------
+
+      if($data[0]->talla_cm==null){
+        $data[0]->talla_cm=0;
+      }
+      if($data[0]->peso_kg==null){
+        $data[0]->peso_kg=0;
+      }
+      $talla_cm = $data[0]->talla_cm;
+      $peso_kg = $data[0]->peso_kg;
+      $edadpaciente = $data[0]->edadpaciente;
+      $sexo = $data[0]->sexo;
+
+      if ($talla_cm != "") { 
+          //PESO POR ALTURA
+          $pesoIdeal=50+(($talla_cm-150)/4)*3+($edadpaciente-20)/4;
+          if($sexo=="M") {
+                $pesoIdeal=$pesoIdeal*0.9;
+          }
+          if($pesoIdeal<=0){
+            $pesoIdeal='';
+          }
+      }else{
+         $pesoIdeal = "";
+      }
+
+      if ($peso_kg != "" && $talla_cm != "") { 
+          $talla_en_metros =  $talla_cm*0.01; 
+          $imc= '';
+          if($peso_kg>0 && $talla_cm>0){
+            $imc=   $peso_kg / ($talla_en_metros * $talla_en_metros);
+            $imc=   number_format($imc, 2, '.', '');
+          }
+      } else {
+          $imc = '';
+      }
+  
+      ///PADRE 
+      $padre_paciente = null; 
+      if($data[0]->id_padre_paciente!=null){
+        $padre_paciente = PadrePaciente::find($data[0]->id_padre_paciente); 
+      }
+  
+      ///MADRE 
+      $madre_paciente = null;
+      if($data[0]->id_madre_paciente!=null){
+        $madre_paciente = MadrePaciente::find($data[0]->id_madre_paciente); 
+      } 
+
+      $natis = [];
+      if(isset($data[0]->id_puerperio)){
+        $model_nati = new Nati();
+        $natis = $model_nati->getByIdPuerpera($data[0]->id_puerperio);
+      }
+
+      //? return view('frontend.admision.emergencia.edit_triaje', ['data' => $data[0],'imc'=>$imc,  'pesoIdeal'=>$pesoIdeal, 'prioridades' => $objPrioridades, 'topicos' => $topicos]);
+      //return view('frontend.admision.emergencia.edit_triaje', );
+
+      return view('frontend.admision.emergencia.ver_triaje',
+      [ 
+      'data' => $data[0],
+      'imc'=>$imc,  
+      'pesoIdeal'=>$pesoIdeal, 
+      'nombre_establecimiento' => $nombre_establecimiento, 
+      'flag_pendinte_firma' => $flag_pendinte_firma, 
+      'padre_paciente' => $padre_paciente, 
+      'madre_paciente' => $madre_paciente,
+      'natis' => $natis
+      ]);
+
+    }
+
+  public function ver_admision($id, $estado)
+  {
+    if (!Auth::check()) :
+      return redirect('/auth/login');
+    endif; 
+ 
+    //1 PRESCRIPTOR MEDICO
+    //8 PROFESIONAL DE ARCHIVOS
+    //VALIDAMO QUE SEA PRESCRIPTOR MEDICO Y   PROFESIONAL DE ARCHIVOS QUE ES EL TIPO 1
+    if(Auth::user()->tipo_registro == 1 || Auth::user()->tipo_registro == 8){
+
+    }else{
+      Session::flash('flash_message', 'Sólo los médicos pueden registrar triaje');
+      return redirect('/');
+    }
+    //VALIDAMO QUE SEA PRESCRIPTOR MEDICO Y   PROFESIONAL DE ARCHIVOS QUE ES EL TIPO 1				
+
+
+    //
+    //$verificar = Emergencia::where('id', $id)->where('estado', $estado)->first();
+    //GetAdmisionEmergenciaById
+    $model_emergencias = new \App\Models\Emergencia;
+    $verificar = $model_emergencias->GetAdmisionEmergenciaById($id);
+
+    
+    if (is_object($verificar)) :
+      $model_emergencias = new Emergencia;
+      //$admision_emergencia = $model_emergencias->GetBuscaEmergenciaTriaje($id,$estado);
+      $admision_emergencia = $model_emergencias->GetAdmisionEmergenciaById($id);
+      //dd($admision_emergencia);
+      $pendiente_firma = $model_emergencias->GetDocumentosPendientesFirmarAdmisionId($id);
+      $flag_pendiente_firma = (count($pendiente_firma) > 0) ? 1 : 0;
+
+      $model_distrito = new  Distrito;
+      
+      if ($admision_emergencia->violencia != null) {
+        $data_violencia = json_decode($admision_emergencia->violencia)[0];
+        $model_tipoviolencia = new Violencia;
+        $modoviolencia = $model_tipoviolencia->showTipo_violencia($data_violencia->id_violencia);
+        $provincia_violencia = $model_distrito->ShowProvincia($data_violencia->id_dpto);
+        $distrito_violencia = $model_distrito->ShowDistrito($data_violencia->id_prov);
+
+      } else {
+        $data_violencia["id_emergencia_violencia"]=null;
+        $data_violencia["id_violencia"]='';
+        $data_violencia["id_modalidad"]='';
+        $data_violencia["id_comisaria"]='';
+        $data_violencia["id_situacion"]='';
+        $data_violencia["fecha_accidente"]='';
+        $data_violencia["hora_accidente"]='';
+        $data_violencia["id_dpto"]='';
+        $data_violencia["id_prov"]='';
+        $data_violencia["id_dist"]='';
+        $data_violencia["lugar_accidente"]='';
+        $data_violencia["id_unidad"]='';
+        $data_violencia["id_emergencia"]='';
+        $data_violencia = json_decode(json_encode($data_violencia));
+        $modoviolencia = '';
+        $provincia_violencia = '';
+        $distrito_violencia = '';
+      }
+
+      if ($admision_emergencia->evacuado != null) {
+        $data_evacuado = json_decode($admision_emergencia->evacuado)[0];
+        $model_receta_diagnostico = new Receta_diagnostico();
+        //dd($data_evacuado->id_emergencia);
+        $diagnostico_evacuado = $model_receta_diagnostico->diagnosticoEmergenciaPorId($data_evacuado->id_emergencia);
+        //dd($diagnostico_evacuado);
+      } else {
+        //crea un objeto vacio con la estructura de evacuado
+        $data_evacuado['id_evacuado'] = null;
+        $data_evacuado['id_emergencia'] = '';
+        $data_evacuado['numero_oficio'] = '';
+        $data_evacuado['id_diagnostico'] = '';
+        $data_evacuado['diagnostico'] = '';
+        $data_evacuado['unidad_policial'] = '';
+        $data_evacuado['id_situacion'] = '';
+        $data_evacuado['id_departamento'] = '';
+        $data_evacuado['observacion'] = '';
+
+        $data_evacuado = json_decode(json_encode($data_evacuado));
+
+        $diagnostico_evacuado = '';
+      }
+
+      $model_forma_ingreso = new Forma_ingreso;
+      $forma_ingreso = $model_forma_ingreso->ShowForma_ingreso();
+
+      $model_estado_ingreso = new Estado_ingreso;
+      $estado_ingreso = $model_estado_ingreso->ShowEstado_ingreso();
+
+      $departamento = $model_distrito->ShowDepartamento();
+      
+      if($admision_emergencia->id_departamento){
+        $provincia = $model_distrito->ShowProvincia($admision_emergencia->id_departamento);
+        $distrito = $model_distrito->ShowDistrito($admision_emergencia->id_provincia);
+      }
+      else{
+        $provincia ='';
+        $distrito ='';
+      }
+
+      $departamento_violencia = $model_distrito->ShowDepartamento();
+      
+      $model_est = new Establecimiento;
+      $establecimiento = $model_est->GetById(Auth::user()->id_establecimiento);
+      $nombre_establecimiento = $establecimiento[0]->nombre;
+
+      $model_kardex = new Kardexe();
+      $fechaServidor = $model_kardex->getFechaServidor();
+
+      $model_categoria = new Categoria;
+      $categoria = $model_categoria->ShowCategoria();
+
+      $model_violencia = new Violencia;
+      $violencia = $model_violencia->ShowViolencia();
+
+      $model_comisaria = new Comisaria;
+      $comisaria = $model_comisaria->ShowComisaria();
+
+      $model_situacion = new Situacion;
+      $situacion = $model_situacion->ShowSituacion();
+
+      $model_unidad = new Unidadpago;
+      $unidad = $model_unidad->ShowUnidadpago();
+
+      $ipress = $model_est->ShowAllEstablecimientos();
+
+      $model_diagnostico = new Diagnostico();
+      $diagnosticos = $model_diagnostico->ShowDiagnosticos();
+
+      $model_tipo_beneficiario = new Tipo_beneficiario;
+      $tipo_beneficiario = $model_tipo_beneficiario->ShowTipo_beneficiario(); 
+
+      $model_tipo_parentesco = new Tipo_parentescos;
+      $tipo_parentesco_obj = $model_tipo_parentesco->getTipo_parentescos_by_id($admision_emergencia->id_tipo_parentesco); 
+      $tipo_parentesco=$tipo_parentesco_obj[0]->descripcion; 
+      //$model_guardia = new Medico_turno;
+      //$personal_guardia = $model_guardia->GetMedicoByIdIpressAndIdConsultorioAndTurnoEmergencia(Auth::user()->id_establecimiento, 229, 'M', $fechaServidor);
+
+      $id_admision = $id;      
+
+      return view('frontend.admision.emergencia.ver_admision', compact(
+        'admision_emergencia', 'forma_ingreso', 'estado_ingreso', 'departamento', 'nombre_establecimiento', 
+        'fechaServidor', 'categoria', 'violencia', 'comisaria', 'situacion', 'unidad', 'diagnosticos', 'tipo_beneficiario',
+         'modoviolencia', 'personal_guardia', 'data_violencia', 'data_evacuado','provincia','distrito','departamento_violencia',
+         'provincia_violencia','distrito_violencia','flag_pendiente_firma','id_admision','ipress','diagnostico_evacuado',
+        'tipo_parentesco'));
+    else :
+
+      return redirect('/all_triajes_atendidas_by_emergencia/')->withInput()->withErrors(array('Elemento no encontrado ..!'));
+    endif;
+  }
+
+  public function Buscar_persona_triaje_ajax(Request $request){ 
+    $id_asegurado = $request->id_asegurado;
+    $model_emergencias= new Emergencia();
+    $datos_emergencia = $model_emergencias->GetEmergenciaByIdAsegurado($id_asegurado);
+    return json_encode($datos_emergencia);    
+  }
+
+  public function buscar_dia_estancia_ajax(Request $request){ 
+    $id_asegurado = $request->id_asegurado;
+    $fecha_egreso = $request->fecha_egreso;
+    $hora_egreso = $request->hora_egreso;
+    $model_emergencias= new Emergencia();
+    $datos_estancia = $model_emergencias->GetEmergenciaDiaEstancia($id_asegurado,$fecha_egreso,$hora_egreso);
+    return json_encode($datos_estancia);    
+  }
+
+   public function ver_atencion_emergencia($id_emergencia) {
+
+    $id_user=Auth::user()->id;//76  
+    $prestacion = Prestaciones::where('id_ext', '=', $id_emergencia)->where('id_tipo_atencion', '=', 2)->first();
+
+    if(count($prestacion)>0){
+      return redirect('/ver_prestacion_emergencias/' . $id_user.'/'.$prestacion->id);
+      
+    }
+    else{
+      Session::flash('flash_message', 'No hay ninguna atención para este paciente. Consultar con el admistrador del Sistema');
+      return redirect('/edit_emergencia_triaje/' . $request->id);
+    } 
+
+  }
+
+  private function formulario_atencion_escalas() 
+  {
+    $aPuntaleLetras = ['', 'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I'];
+    $model_reseta_vale = new \App\Models\Receta_vale();
+    $escala = $model_reseta_vale->GetEscalas();
+    $escala_opciones = $model_reseta_vale->GetEscalaOpciones();
+    $aEscala = [];
+    foreach ($escala as $item) {
+      $aEscala[$item->id]['nombre'] = $item->nombre;
+      $aEscala[$item->id]['tipo'] = $item->tipo;
+    }
+    foreach ($escala_opciones as $item) {
+      if ($item->id_parent == 0) {
+        $aEscala[$item->id_escala]['item'][$item->id]['nombre'] = $item->nombre;
+      } else {
+        $puntaje = null;
+        if ($aEscala[$item->id_escala]['tipo'] == 3) {
+          $puntaje = isset($aPuntaleLetras[$item->puntaje]) ? $aPuntaleLetras[$item->puntaje] : '--';
+        } else {
+          $puntaje = $item->puntaje;
+        }
+        $aEscala[$item->id_escala]['item'][$item->id_parent]['item'][] = [
+          'nombre' => $item->nombre,
+          'puntaje' => $puntaje
+        ];
+      }
+    }
+    return $aEscala;
+  }
+
+  public function ver_prestacion_emergencias($id_user, $id_prestacion)
+  {
+
+    if (!Auth::check()) :
+      return redirect('/auth/login');
+    endif;
+
+    if (Auth::user()->tipo_registro == 1) {
+      $modelfarma = new Farmacia;
+      $model_receta = new Receta_vale;
+      $model_producto = new Producto;
+      $model_productos_receta = new Producto_receta;
+      $model_establecimiento = new \App\Models\Establecimiento;
+      $model_prestacion = new \App\Models\Prestaciones;
+      $model_laboratorio = new \App\Models\Laboratorio;
+      $model_radiologia = new \App\Models\Radiologia;
+      $model_interconsulta = new \App\Models\Interconsulta;
+      $model_referencia = new \App\Models\Referencia;
+      $model_kardex = new Kardexe();
+
+      $farmacia = $modelfarma->GetFarmaByUser($id_user);
+      $flag_receta_dias = $farmacia->flag_receta_dias;
+
+      $fechaServidor = $model_kardex->getFechaServidor();
+      $date = Carbon::now();
+      $fecha_actual = $date->format('d-m-Y');
+      $prestacion = $model_prestacion->GetPrestacionById($id_prestacion);
+
+      //CARGA DE SALUD MATERNA
+      $emergencia = Emergencia::find($prestacion->id_ext);
+      $gestacion = null;
+      $puerperio = null;
+      $natis = null;
+      if (isset($emergencia -> id_gestacion)) {
+        $gestacion = Gestacion::find($emergencia -> id_gestacion);
+        error_log('HAY GESTACION EN UNA ATENCION: '.(string)$gestacion);
+      }
+      if (isset($emergencia -> id_puerperio)) {
+        $puerperio = Puerperio::find($emergencia -> id_puerperio);
+        error_log('HAY PUERPERIO EN UNA ATENCION: '.(string)$puerperio);
+        // TODO: Verificar que tenga registros
+        $natis = $puerperio->natis;
+        error_log('sus natis: '.(string)$natis);
+      }
+
+      $receta = $model_receta->GetDatosRecetasByIdPrestacion($id_prestacion);
+      $receta_alta = $model_receta->GetDatosRecetasAltasByIdPrestacion($id_prestacion);
+      $diagnostico = $model_prestacion->GetDiagnosticoByIdPrestacionEmergencia($id_prestacion);
+      $diagnosticos_egreso = $model_prestacion->GetDiagnosticoByIdAltaPrestacion($id_prestacion);
+      $diagnosticos = \App\Models\Diagnostico::where('estado',1)
+      ->whereRaw('LENGTH(codigo) > 4') 
+      ->get();
+
+      $model_procedimiento = new \App\Models\Procedimiento();
+      $procedimiento = $model_procedimiento->GetProcedimientosAtencionEmergencia($id_prestacion);
+      // $procedimiento = $model_prestacion->GetProcedimientosByIdPrestacionydiag($id_prestacion, 1);
+      /*$procedimientos = \App\Models\Procedimiento::where('estado',1)
+      ->get();*/
+      $laboratorio = $model_laboratorio->GetLaboratorioByIdPrestacion($id_prestacion);
+      if (empty($laboratorio)) {
+        $flag_laboratorio = "0";
+        $flag_firmar_laboratorio = "";
+      } else {
+        $flag_laboratorio = "1";
+        $flag_firmar_laboratorio = $laboratorio[0]->fecha_firma;
+      }
+      $radiologia = $model_radiologia->GetRadiologiaByIdPrestacion($id_prestacion);
+      if (count($radiologia)>0) {
+      
+        $flag_radiologia = "1";
+        $flag_firmar_radiologia = $radiologia[0]->fecha_firma;
+      } else {
+        $flag_radiologia = "0";
+        $flag_firmar_radiologia = "";
+      }
+      
+      $pendiente_firma = $model_prestacion->GetDocumentosPendintesFirmarPrestacionId($id_prestacion);
+      $flag_pendinte_firma = (count($pendiente_firma) > 0) ? 1 : 0;
+
+      $id_ipress = $farmacia->id_establecimiento;
+      if($id_ipress==76): //lns
+        $id_farmacia = 19; //farmacia de emergencia
+      else:
+        $id_farmacia = $farmacia->id;
+      endif;
+      $establecimiento = $model_establecimiento->GetById($id_ipress);
+      if ($id_ipress == 1) {
+        $nivel = 2;
+      } else {
+        $nivel = $establecimiento[0]->nivel;
+      }
+      //Si tiene atenciones en hospitalizacion o emergencia
+      $sw = 0;
+      if($prestacion->id_ext!=0):
+        if($prestacion->tipo_atencion=='EMERGENCIA'):
+          $dato_emergencia = Emergencia::where('id', '=', $prestacion->id_ext)->first(); 
+          $model_emergencia = new \App\Models\Emergencia;
+          if($dato_emergencia->id_prioridad<4):
+            $obtenerdato = $model_emergencia->GetObtenerServicioActual($prestacion->id_ext);
+            $datoadicional = $model_emergencia->GetObtenerCama($obtenerdato->cama);
+            $sw = 1;
+            $prestacion->servicio= $obtenerdato->servicio;
+            $prestacion->consultorio= $obtenerdato->consultorio;
+          else:
+            $prestacion->servicio="IV - PATOLOGÍA AGUDA COMÚN";
+            $prestacion->consultorio="CONSULTORIO DE ATENCIÓN RÁPIDA (CAR)";
+            $sw = 0;
+          endif;
+          $producto = $model_producto->getProductosByNivelAndIdServicio($nivel, $id_ipress, $id_farmacia); 
+        endif;
+      else:
+           return redirect('/dashboard')->withInput()->withErrors(array('No encontro la atención..!'));
+      endif;
+      
+      $producto = $model_producto->getProductosByNivelAndIdServicio($nivel, $prestacion->id_consultorio, $id_farmacia);
+      
+      $farmacias = $modelfarma->GetFarmaciaById($id_farmacia);
+      $establecimientos = $model_establecimiento->ShowAllEstablecimientos();
+      $interconsultas = $model_interconsulta->GetInterconsultaByIdPrestacion($id_prestacion);
+
+      $referencia = $model_referencia->GetReferenciaByIdPrest($id_prestacion);
+      
+      $flag_no_encontrado=0; 
+      $model_asegurado= new Asegurado();
+      if($prestacion->id_asegurado_titular!=null || $prestacion->id_asegurado_titular>0):
+        $dato_titular = $model_asegurado->Busca_datos_titular($prestacion->id_asegurado_titular);
+      else:
+        $flag_no_encontrado=1;
+      endif;
+
+      $ruta = "all_admisiones_atendidas_by_emergencia";
+      $menu = \App\Models\Menu::getMenuByUsuario(Auth::user()->id, $ruta);
+      $permiso = $menu[0];
+
+      $date = Carbon::now();
+      $hora=$date->toTimeString(); 
+
+      if($hora>'01:30' & $hora<'07:31'):
+        /*echo*/ $turno='MD';
+      else:
+        if($hora>'07:30' & $hora<'13:31'):
+          /*echo*/ $turno='M';
+        else:
+          if($hora>'13:30' & $hora<'19:31'):
+            /*echo*/ $turno='T';
+          else:
+            if($hora>'19:30' & $hora<='23:59'):
+              /*echo*/ $turno='N';
+            else:
+              if($hora>='00:00' & $hora<='01:31'):
+                /*echo*/ $turno='N';
+              endif;
+            endif;
+          endif;
+        endif;
+      endif;
+      $id_principal=$dato_emergencia->id;
+      $model_tipo_parentesco = new Tipo_parentescos;
+      $tipo_parentesco_obj = $model_tipo_parentesco->getTipo_parentescos_by_id($dato_emergencia->id_tipo_parentesco); 
+      $tipo_parentesco=$tipo_parentesco_obj[0]->descripcion;
+
+      $id_prioridad = $dato_emergencia->id_prioridad;
+
+      if($dato_emergencia->id_referencia != 0){
+        $model_referencia = new \App\Models\Referencia;
+        $referencias = $model_referencia->GetBuscaReferenciaById($dato_emergencia->id_referencia);
+        $model_prestacionreferncia = new \App\Models\Prestaciones;
+        $diagnostico_prestacion_referencia = $model_prestacionreferncia->GetDiagnosticoByIdPrestacion($referencias->id_prestacion);
+        $medico_referencia = DB::table('medicos')
+        ->select('medicos.*')
+        ->where('id', $referencias->id_medico_referencia)
+        ->first();
+        $nombre_medico_referencia = $medico_referencia->paterno. ' '. $medico_referencia->materno. ','.$medico_referencia->nombre;
+        $procedimientos_refencia = $model_referencia->buscar_procedimiento_referencia($dato_emergencia->id_referencia);
+        $servicios_ipress_origen = $model_referencia->busca_servicio_por_ipres_origen_referencia($referencias->id_establecimiento);
+      
+      }else{
+        $diagnostico_prestacion_referencia = "";
+        $referencias = "";
+        $procedimientos_refencia="";
+        $servicios_ipress_origen="";
+      }
+
+      //============== Ordenes de Imagenes invalidados por Imagenes ============================
+      $ordenImagenesAnulada = $model_radiologia->cpmsAnulados(2,$id_prestacion);
+      //dd($ordenImagenesAnulada);
+      $orden = '';
+      $ordenes = [];
+      if ( count($ordenImagenesAnulada) > 0 ) {
+        foreach ($ordenImagenesAnulada as $key) {
+          if ( $orden !== $key->id_radiologia ) {
+            $orden = $key->id_radiologia;
+
+            $obj = new stdClass();
+            $obj->id_radiologia = $key->id_radiologia;
+            $obj->obs_examen_invalidado = $key->obs_examen_invalidado;
+            $obj->fecha_orden_invalidado = $key->fecha_orden_invalidado;
+            $obj->usuario = $key->name . ', ' . $key->paterno; 
+
+            $ordenes[] = $obj;
+          }
+        }
+        //dd($ordenes);
+
+        foreach ($ordenes as $key1) {
+          $key1->cpms = [];
+          foreach ($ordenImagenesAnulada as $key2) {
+            //dd($key1->id_radiologia);
+            if ($key1->id_radiologia == $key2->id_radiologia) {
+
+              $obj = new stdClass();
+              $obj->id_pp = $key2->id;
+              $obj->codigo_rad = $key2->codigo_rad;
+              $obj->descripcion_corta = $key2->descripcion_corta;
+              $obj->diagnostico = $key2->diagnostico;
+
+              $key1->cpms[] = $obj;
+            }  
+          }  
+        }
+
+        
+      }
+
+      // Verificar si el usuario es medico de profesion
+      $model_medico = new Medico();
+      $medico = $model_medico->GetDatosMedicoByDniAndEstablecimiento(Auth::user()->dni,Auth::user()->id_establecimiento );
+      $is_profesion_medico = false;
+      if (count($medico) > 0) {
+        switch ($medico->id_profesion) {
+          case 20: case 4: case 51: case 52: case 1: $is_profesion_medico = true; break;
+        }
+      }
+
+      $model_consultorio = new Consultorio;
+      $establecimiento_servicios = $model_consultorio->GetServiciosPorEstablecimiento($id_ipress);
+
+      //dd($ordenes);
+      //========================================================================================
+
+      $eventosMarcados = Prestacion_eventos::where('id_prestacion', $id_prestacion)
+          ->where('estado', 1)
+          ->lists('id_evento')
+          ->toArray();
+      
+      $establecimiento_traslado = null;
+      if (!empty($emergencia->origen_alta) && intval($emergencia->origen_alta) == 2):
+
+        if ($emergencia->id_tipo_egres_med == 3):
+          $establecimiento_model = new Establecimiento();
+          $establecimiento_traslado = $establecimiento_model->GetByIdEstablecimiento($emergencia->id_establecimiento_traslado);
+        endif;
+
+        $dato_traslado = null;
+        $dato_traslado = $model_emergencia->GetVerUbicacionTraslado2($emergencia->id);
+
+      endif;
+
+      $pabellon = null;
+      $upss_alta = null;
+      $diagnosti= array();
+
+      if($id_ipress==76){  
+        if (!empty($emergencia->origen_alta) && intval($emergencia->origen_alta) === 2) {
+          $pabellon = DB::table('pabellones')
+                      ->where('pabellones.id', $emergencia->id_pabellon_ubicacion)
+                      ->first();
+
+          $upss_alta = DB::table('upsses')
+                      ->where('upsses.id', $emergencia->id_upss_alta)
+                      ->first();
+
+          $diagnos = "SELECT  d.id,d.codigo,d.nombre,d.nombre as cabecera,d.nombre as tipo  from diagnosticos d where id='$emergencia->id_diag_cab'";
+          $diagnos = DB::select($diagnos);
+          $diagnos = $diagnos[0];
+          $diagnos->cabecera = "PRINCIPAL";
+          $diagnos->tipo = "DEFINITIVO";
+          $diagnosti[0]=$diagnos;
+
+          if ($emergencia->id_diag_cuer1>0) {
+
+            $diagnos = "SELECT  d.id,d.codigo,d.nombre,d.nombre as cabecera,d.nombre as tipo  from diagnosticos d where id='$emergencia->id_diag_cuer1'";
+            $diagnos = DB::select($diagnos);
+            $diagnos = $diagnos[0];
+            $diagnos->cabecera = "SECUNDARIO";
+            $diagnos->tipo = "DEFINITIVO";
+            $diagnosti[1] = $diagnos;
+          } elseif ($emergencia->id_diag_cuer2>0) {
+
+            $diagnos = "SELECT  d.id,d.codigo,d.nombre,d.nombre as cabecera,d.nombre as tipo  from diagnosticos d where id='$emergencia->id_diag_cuer2'";
+            $diagnos = DB::select($diagnos);
+            $diagnos = $diagnos[2];
+            $diagnos->cabecera = "SECUNDARIO";
+            $diagnos->tipo = "DEFINITIVO";
+            $diagnosti[2] = $diagnos;
+          }
+        }
+      }
+
+      // Validar campo de habilitacion de firma electronica
+      $is_habilitado_firma_electronica = $establecimiento[0]->flag_firma_electronica;
+
+      return view('frontend.admision.emergencia.ver_atencion_emergencia', compact('diagnosticos_egreso','dato_titular','eventosMarcados','emergencia','servicios_ipress_origen','nombre_medico_referencia','procedimientos_refencia','diagnostico_prestacion_referencia','referencias','farmacia', 'prestacion', 'diagnostico', 'procedimiento', 'medicamentos', 'id_prestacion', 'fechaServidor', 'receta', 'receta_alta', 'producto', 'farmacias', 'nivel', 'laboratorio', 'radiologia', 'flag_pendinte_firma','establecimientos','interconsultas','referencia','diagnosticos',/*'procedimientos',*/'datoadicional','sw','permiso','flag_no_encontrado','turno','id_farmacia','dato_emergencia','tipo_parentesco','id_prioridad', 'natis', 'flag_laboratorio', 'flag_firmar_laboratorio','gestacion', 'puerperio','flag_radiologia','flag_firmar_radiologia','ordenImagenesAnulada','ordenes','is_profesion_medico','establecimiento_servicios', 'is_habilitado_firma_electronica', 'dato_traslado','id_principal', 'establecimiento_traslado', 'pabellon', 'upss_alta', 'diagnosti'));
+    }
+    else
+    {
+      return redirect('/dashboard')->withInput()->withErrors(array('No tiene el perfil de médico..!'));
+    }
+  }
+
+  public function serviciosxMedicos()
+  {
+      $model_emergencia = new \App\Models\Emergencia;
+      $listadoServiciosDisponibles = $model_emergencia->serviciosxmedicos();
+  
+      $idsConsultorio = [];
+      foreach ($listadoServiciosDisponibles as $servicio) {
+          $idsConsultorio[] = $servicio->id_consultorio;
+      }
+  
+      // Eliminar duplicados y mantener solo valores únicos
+      $idsConsultorio = array_unique($idsConsultorio);
+  
+      // Consultar consultorios y almacenar resultados en un array de objetos
+      $consultorios = [];
+      foreach ($idsConsultorio as $idConsultorio) {
+          $consultorio = DB::table('consultorios')
+                          ->select('id', 'nombre')
+                          ->where('id', $idConsultorio)
+                          ->first();
+  
+          if ($consultorio) {
+              $consultorios[] = $consultorio;
+          }
+      }
+  
+      // Descomenta la siguiente línea si quieres ver el array de consultorios en formato legible
+  
+      return json_encode($consultorios);
+  }
+
+
+
+  public function medicosxServicio(Request $request)
+  {
+      $idvalor = intval($request->valorSeleccionado);
+      $model_emergencia = new \App\Models\Emergencia;
+      $listadodemedicosdisponibles = $model_emergencia->medicosxservicios($idvalor);
+  
+      $medicos = [];
+      foreach ($listadodemedicosdisponibles as $medico) {
+          $medicoInfo = DB::table('medicos')
+              ->select('id', 'nombre', 'paterno', 'materno')
+              ->where('id', $medico->id_medico)
+              ->first();
+  
+          if ($medicoInfo) {
+              $medicoInfo->nombre_completo = $medicoInfo->nombre . ' ' . $medicoInfo->paterno . ' ' . $medicoInfo->materno;
+
+              $medicos[] = $medicoInfo;
+          }
+      }
+
+      return json_encode($medicos);
+  }
+
+  public function turnosmedico(Request $request)
+  {
+      $idvalor = intval($request->valorSeleccionado);
+      $model_emergencia = new \App\Models\Emergencia;
+      $turnosmedico = $model_emergencia->turnomedico($idvalor);
+  
+      $turnos = [];
+      foreach ($turnosmedico as $turnoMedico) {
+          $turnoInfo = DB::table('turnos')
+              ->select('id', 'descripcion', 'hora_ini', 'hora_fin')
+              ->where('id', $turnoMedico->id_turno)
+              ->first();
+  
+          if ($turnoInfo) {
+              $turnoInfo->descripcion_concatenada = $turnoInfo->descripcion . '-' . $turnoInfo->hora_ini . '-' . $turnoInfo->hora_fin;
+              $turnos[] = [
+                  'id' => $turnoInfo->id,
+                  'descripcion_concatenada' => $turnoInfo->descripcion_concatenada,
+              ];
+          }
+      }
+  
+      return json_encode($turnos);
+  }
+
+  public function mostrar_atencion_emergencia($id_prestacion)
+  {
+    if (!Auth::check()) :
+      return redirect('/auth/login');
+    endif;
+
+    $model_prestacion = new \App\Models\Prestaciones;
+    $prestacion = $model_prestacion->GetPrestacionById($id_prestacion);
+    $flag_bloqueo_atencion = $prestacion ? DB::table('asegurados')->where('id', $prestacion->id_asegurado)->value('flag_bloqueo_atencion') : null;
+    if ($flag_bloqueo_atencion !== null && intval($flag_bloqueo_atencion) === 1) :
+      return response()->json(['message' => 'No puede ver la atención de este paciente.'], 403);
+    endif;
+
+    $modelfarma = new Farmacia;
+    $model_receta = new Receta_vale;
+    $model_producto = new Producto;
+    $model_interconsulta = new \App\Models\Interconsulta;
+    $model_establecimiento = new \App\Models\Establecimiento;
+    $model_laboratorio = new \App\Models\Laboratorio;
+    $model_radiologia = new \App\Models\Radiologia;
+    
+    $farmacia = $modelfarma->GetFarmaByUser(Auth::user()->id);
+    $id_farmacia = $farmacia->id;
+    
+    $receta = $model_receta->GetDatosRecetasByIdPrestacion($id_prestacion);
+    $diagnostico = $model_prestacion->GetDiagnosticoByIdPrestacionEmergencia($id_prestacion);
+    $procedimiento = $model_prestacion->GetProcedimientosByIdPrestacion($id_prestacion, 1);
+    $laboratorio = $model_prestacion->GetProcedimientosByIdPrestacionLab($id_prestacion);
+    $radiologia = $model_prestacion->GetProcedimientosByIdPrestacion($id_prestacion, 3);
+    
+    //$laboratorio = $model_laboratorio->GetLaboratorioByIdPrestacion($id_prestacion);
+    //$radiologia = $model_radiologia->GetRadiologiaByIdPrestacion($id_prestacion);
+
+    $obtenerdato = null;
+    if ($prestacion->id_tipo_atencion == 2):
+    $model_emergencia = new \App\Models\Emergencia;
+    $obtenerdato = $model_emergencia->GetObtenerServicioActual($prestacion->id_ext);
+    elseif ($prestacion->id_tipo_atencion == 3):
+      $obtenerdato = Hospitalizacione::find($prestacion->id_ext);
+    endif;
+
+    $sw = 0;
+    if ($prestacion->id_tipo_atencion == 2):
+	if($obtenerdato->id_prioridad!=4):
+	      $prestacion->servicio= $obtenerdato->servicio;
+	      $prestacion->consultorio= $obtenerdato->consultorio;
+	      $datoadicional = $model_emergencia->GetObtenerCama($obtenerdato->cama);
+	      $sw = 1;
+	else:
+	      $prestacion->servicio="IV - PATOLOGÍA AGUDA COMÚN";
+	      $prestacion->consultorio="CONSULTORIO DE ATENCIÓN RÁPIDA (CAR)";
+	      $sw = 0;
+	endif;
+    elseif ($prestacion->id_tipo_atencion == 3):
+      $prestacion->servicio="";
+      $prestacion->consultorio="";
+    endif;
+    
+    $interconsultas = $model_interconsulta->GetInterconsultaByIdPrestacion($id_prestacion);
+    $dato_triaje = Emergencia::where('id', '=', $prestacion->id_ext)->first(); 
+  
+    return view('frontend.evaluaciones.mostrar_atencion_emergencia', compact('farmacia', 'prestacion', 'diagnostico', 'procedimiento', 'medicamentos', 'id_prestacion', 'receta', 'laboratorio', 'radiologia','datoadicional','interconsultas','dato_triaje','sw'));
+  }
+
+  public function mostrar_atencion_emergencia_ajax($id_prestacion)
+  {
+    if (!Auth::check()) :
+      return redirect('/auth/login');
+    endif;
+
+    $modelfarma = new Farmacia;
+    $model_receta = new Receta_vale;
+    $model_producto = new Producto;
+    $model_interconsulta = new \App\Models\Interconsulta;
+    $model_establecimiento = new \App\Models\Establecimiento;
+    $model_prestacion = new \App\Models\Prestaciones;
+    $model_laboratorio = new \App\Models\Laboratorio;
+    $model_radiologia = new \App\Models\Radiologia;
+    
+    $farmacia = $modelfarma->GetFarmaByUser(Auth::user()->id);
+    $id_farmacia = $farmacia->id;
+    
+    $prestacion = $model_prestacion->GetPrestacionById($id_prestacion);
+    $receta = $model_receta->GetDatosRecetasByIdPrestacion($id_prestacion);
+    $medicamentos = null;
+    if ($receta) {
+      if (count($receta) > 0) {
+        $model_productos_receta = new \App\Models\Producto_receta;
+        $medicamentos = $model_productos_receta->ShowMedicinasById_receta_vale($receta[0]->id);
+      }
+    }
+    $diagnostico = $model_prestacion->GetDiagnosticoByIdPrestacionEmergencia($id_prestacion);
+    $procedimiento = $model_prestacion->GetProcedimientosByIdPrestacion($id_prestacion, 1);
+    $laboratorio = $model_prestacion->GetProcedimientosByIdPrestacionLab($id_prestacion);
+    $radiologia = $model_prestacion->GetProcedimientosByIdPrestacion($id_prestacion, 3);
+    
+    $obtenerdato = null;
+    $datoadicional = null;
+    if ($prestacion->id_tipo_atencion == 2):
+      $model_emergencia = new \App\Models\Emergencia;
+      $obtenerdato = $model_emergencia->GetObtenerServicioActual($prestacion->id_ext);
+    elseif ($prestacion->id_tipo_atencion == 3):
+      $obtenerdato = Hospitalizacione::find($prestacion->id_ext);
+    endif;
+
+    $sw = 0;
+    if ($prestacion->id_tipo_atencion == 2):
+	    if($obtenerdato->id_prioridad!=4):
+	      $prestacion->servicio= $obtenerdato->servicio;
+	      $prestacion->consultorio= $obtenerdato->consultorio;
+	      $datoadicional = $model_emergencia->GetObtenerCama($obtenerdato->cama);
+	      $sw = 1;
+	    else:
+	      $prestacion->servicio="IV - PATOLOGÍA AGUDA COMÚN";
+	      $prestacion->consultorio="CONSULTORIO DE ATENCIÓN RÁPIDA (CAR)";
+	      $sw = 0;
+	    endif;
+    elseif ($prestacion->id_tipo_atencion == 3):
+      $prestacion->servicio="";
+      $prestacion->consultorio="";
+    endif;
+    
+    $interconsultas = $model_interconsulta->GetInterconsultaByIdPrestacion($id_prestacion);
+    $dato_triaje = Emergencia::where('id', '=', $prestacion->id_ext)->select("temperatura", "talla_cm", "peso_kg", "sa02_porcentaje", "tamano_cintura_cm", "frecuencia_cardiaca_fetal", "presion_arterial_x", "presion_arterial_y", "frecuencia_respiratoria", "frecuencia_cardiaca", "fi02")->first();
+    /* dd(json_encode($this->cleanTimestamps($dato_triaje))); */
+    return response()->json([
+      'farmacia' => $this->cleanTimestamps($farmacia),
+      'prestacion' => $this->cleanTimestamps($prestacion),
+      'diagnostico' => $this->cleanTimestamps($diagnostico),
+      'procedimiento' => $this->cleanTimestamps($procedimiento),
+      'medicamentos' => null,
+      'id_prestacion' => $id_prestacion,
+      'receta' => $this->cleanTimestamps($receta),
+      'laboratorio' => $this->cleanTimestamps($laboratorio),
+      'radiologia' => $this->cleanTimestamps($radiologia),
+      'datoadicional' => $this->cleanTimestamps($datoadicional),
+      'interconsultas' => $this->cleanTimestamps($interconsultas),
+      'dato_triaje' => json_encode($dato_triaje),
+      'medicamentos' => $medicamentos,
+      'sw' => $sw,
+    ]);
+  }
+
+  function cleanTimestamps($data) {
+    if (is_array($data)) {
+        return array_map(function ($item) {
+            return array_except((array) $item, ['created_at', 'updated_at']);
+        }, $data);
+    }
+
+    if (is_object($data)) {
+        return array_except((array) $data, ['created_at', 'updated_at']);
+    }
+
+    return $data;
+  }
+
+  //public function registrar_prestacion_transaction_emergencia(Request $request)
+  public function registrar_prestacion_transaction_emergencia(AtencionEmergenciaFormRequest $request)
+  {
+    if (!Auth::check()) :
+      return redirect('/auth/login');
+    endif;
+    $datos=false;
+    $id_prestacion=0;
+    $search = array('+', ',','"','/', '{', '}');
+    $replace = array('\+', '\,', '\"', '\/', '\{', '\}');
+
+    $registro_validado = false;
+    $mensaje_error = "";
+
+    DB::beginTransaction();
+
+    try {
+    
+    $model_prestacion = new \App\Models\Prestaciones;
+    $model_receta  = new \App\Models\Receta_vale;
+    $dni = Auth::user()->dni;
+
+    $p_diagnostico = "";
+    $p_diagnostico .= "{";
+    if (isset($request->id_diagnostico)) :
+      foreach ($request->id_diagnostico as $key => $value) :
+        if ($request->id_diagnostico[$key] != "") {
+          $p_diagnostico .= "{";
+          $p_diagnostico .= $request->id_diagnostico[$key] . ",";
+          $p_diagnostico .= ((isset($request->id_tipo_diagnostico[$key]) && $request->id_tipo_diagnostico[$key] > 0) ? $request->id_tipo_diagnostico[$key] : "0") . ",";
+          $p_diagnostico .= (isset($request->id_categoria_diagnostico[$key]) && $request->id_categoria_diagnostico[$key] > 0) ? $request->id_categoria_diagnostico[$key] : "0";          $p_diagnostico .= "},";
+        }
+      endforeach;
+      if (strlen($p_diagnostico) > 1) $p_diagnostico = substr($p_diagnostico, 0, -1);
+    endif;
+    $p_diagnostico .= "}";
+
+    $p_procedimiento = "";
+    $p_procedimiento .= "{";
+    if (isset($request->id_procedimiento)) :
+      foreach ($request->id_procedimiento as $key => $value) :
+        if ($request->id_procedimiento[$key] != "") {
+          $p_procedimiento .= "{";
+          $p_procedimiento .= $request->id_procedimiento[$key] . ",";
+          $p_procedimiento .= ((isset($request->procedimiento_cantidad[$key]) && $request->procedimiento_cantidad[$key] > 0) ? $request->procedimiento_cantidad[$key] : "0") . ",";
+          $p_procedimiento .= (isset($request->procedimiento_tiempo[$key]) && intval($request->procedimiento_tiempo[$key]) > 0) ? strval($request->procedimiento_tiempo[$key]) : "0";
+          $p_procedimiento .= "},";
+        }
+      endforeach;
+      if (strlen($p_procedimiento) > 1) $p_procedimiento = substr($p_procedimiento, 0, -1);
+    endif;
+    $p_procedimiento .= "}";
+    
+    //$id_prestacion = 0;
+    $fecha_alta = "";
+    $id_motivo_alta = 0;
+    $id_estado_reg = 1;
+    $observacion = "";
+    $id_receta_vale = 0;
+    $id_anestesiologo = 0;
+    $obs_registro = "";
+    $id_receta_vale_bus = 0;
+    $id_admision = 0;
+    $tipo_via = "";
+    $sub_via = "";
+    $final_via = "";
+    $nro_guia = "";
+    $interconsulta = "";
+    $interconsulta_dias = 0;
+    $nro_receta = "";
+    $digitos_adicionales = "";
+    $id_consultorio = 76;
+    $id_tiporeceta  = 2; 
+    $id_tipo_num = 0;
+    $id_servicio_derivar = (isset($request->id_servicio_derivar)) ? $request->id_servicio_derivar : 0;
+    $fecha_expedicion =  (isset($request->fecha_expedicion)) ? $request->fecha_expedicion : "";
+    $anamnesis = (isset($request->anamnesis)) ? $request->anamnesis : "";
+    $examen_fisico = (isset($request->examen_fisico)) ? $request->examen_fisico : "";
+    $aspectos_generales = (isset($request->aspectos_generales)) ? $request->aspectos_generales : "";
+    $estado_receta = 2;
+    $condicion = (isset($request->condicion)) ? $request->condicion : 0;
+    $cantidadReceta = (isset($request->cantidadReceta) && $request->cantidadReceta > 0) ? $request->cantidadReceta : 1;
+    $id_asegurado   = $request->id_asegurado;
+    $receta_prescrita        =  0;
+    $request->id_modalidad = 1;
+    if($request->id_tipo_atencion==2){
+      $id_emergencia = $request->id_cita;
+      $id_hospitalizacion = 0;
+      $id_cita= 0;
+    }
+    else
+    {
+      $id_hospitalizacion = $request->id_cita;
+      $id_cita= 0; 
+      $id_emergencia = 0;
+    }
+
+    $p_producto = "";
+    $p_producto .= "{";
+    if (isset($request->id_producto)) :
+          if($request->id_producto[0]!="ru='undefined'"):
+      $receta_prescrita=1;
+      foreach ($request->id_producto as $key => $value) :
+        if ($request->id_producto[$key] != "") {
+          $p_producto .= "{";
+          $p_producto .= $request->id_producto[$key] . ",";
+          $p_producto .= $request->tiempo_periodo[$key] . ",";
+          $p_producto .= $request->nro_med_solictados[$key] . ",";
+          $p_producto .= (isset($request->nro_med_entregados[$key]) && $request->nro_med_entregados[$key] != "") ? $request->nro_med_entregados[$key] : 0;
+          $p_producto .= ",";
+          $p_producto .= (isset($request->nro_stocks_almacen[$key]) && $request->nro_stocks_almacen[$key] != "") ? $request->nro_stocks_almacen[$key] : 0;
+          $p_producto .= ",";
+          $p_producto .= (isset($request->nro_stocks_establecimiento[$key]) && $request->nro_stocks_establecimiento[$key] != "") ? $request->nro_stocks_establecimiento[$key] : 0;
+          $p_producto .= ",";
+          $p_producto .= (isset($request->nro_stocks[$key]) && $request->nro_stocks[$key] != "") ? $request->nro_stocks[$key] : 0;
+          $p_producto .= ",";
+          $p_producto .= (isset($request->posologia[$key]) && $request->posologia[$key] != "") ? str_replace(",", "###", $request->posologia[$key]) : "-";
+          $p_producto .= ",";
+          $p_producto .= (isset($request->miSelectProd[$key]) && $request->miSelectProd[$key] != "") ? $request->miSelectProd[$key] : 0;
+          $p_producto .= ",";
+          $p_producto .= $request->id_via_administracion[$key];
+          $p_producto .= "},";
+        }
+      endforeach;
+      if (strlen($p_producto) > 1) $p_producto = substr($p_producto, 0, -1);
+    endif;
+        endif;
+    $p_producto .= "}";
+
+    $ipress_bene    = $request->ipress_bene;
+    $upss_bene        = $request->upss_bene;
+    $id_farmacia_receta        =  ($request->id_farmacia_receta!="") ? $request->id_farmacia_receta : 0;
+    if (Auth::user()->tipo_registro == 3) $id_receta_vale_bus = 1;
+
+    $id_sub_consultorio=545;
+    $model_cita = new \App\Models\Cita;
+    $model_kardex = new Kardexe();
+    $id_cita = 0;
+    $fecha_cita = $model_kardex->getFechaServidor();
+    $correo = "";$domicilio = "";$telefono = ""; $telefono2 = ""; $tipo_cita = 1; $adicional = 1 ;
+
+    $fecha_hora_atencion = $request->fecha_atencion . ' ' . $request->hora_atencion;
+
+    //dd($request);
+    $id_cita = $model_cita->registrarCita($id_cita, $request->id_establecimiento, $id_sub_consultorio, $request->id_medico, $request->id_user, $fecha_hora_atencion, $request->tipodoc_beneficiario, $request->nrodocafiliado, $request->nombre_beneficiario, $request->paterno_beneficiario, $request->materno_beneficiario, $request->tipo_beneficiario, $request->nro_historia, $request->grado, $request->fecnacafiliado, $request->nomsexo, $request->cip_beneficiario, $request->tipodoc_titular, $request->nrodoctitular, $request->nombre_titular, $request->paterno_titular, $request->materno_titular, NULL, 1, 1, $correo,$domicilio,$telefono,$telefono2,$tipo_cita,2,'NO',0,NULL,NULL,'','','','','','','');
+    $cita = $model_cita->GetCitasByIdCita($id_cita);
+    $id_asegurado = $cita->id_asegurado;
+    $registrar_cita = 0;
+
+        //VALIDA SI EXISTE UNA ATENCION MEDICA CON DATOS CITA Y PACIENTE, DE LO CONTRARIO MOSTRARA UN MENSAJE AL USUARIO
+        $paciente = Asegurado::find($id_asegurado);
+        $paciente_nombres = $paciente->nombre.' '.$paciente->paterno.' '.$paciente->materno;
+        $prestaciones = Prestaciones::where('id_cita',$id_cita)->where('id_asegurado',$id_asegurado)->exists();
+        if($prestaciones){
+          Session::flash('flash_message', 'No se pudo registrar la Prestación, ya existe una una atención médica con cita Nº '.$id_cita.' para el paciente '.$paciente_nombres.' , vuelva a intentarlo nuevamente');
+          return redirect('/formulario_atencion_emergencia/'. $id_emergencia);
+        }
+        //SOLO SE DEBE REGISTRAR LA ATENCION MEDICA SI NO EXISTE EL ID_CITA Y ID_ASEGURADO
+    $id_prestacion = $model_prestacion->registrarPrestacionNew($id_cita, $id_asegurado, $request->id_tipo_atencion, $request->id_establecimiento, $id_sub_consultorio, $fecha_hora_atencion, $fecha_alta, $request->id_medico, $id_motivo_alta, $id_estado_reg, $observacion, $id_receta_vale, $id_farmacia_receta, $request->id_user, $nro_receta, $digitos_adicionales, $id_anestesiologo, $obs_registro, $id_receta_vale_bus, $id_admision, $tipo_via, $sub_via, $final_via, $nro_guia, $interconsulta, $interconsulta_dias, $fecha_expedicion, $id_servicio_derivar, $id_tipo_num, $anamnesis, $examen_fisico, $aspectos_generales, $estado_receta, $condicion, $cantidadReceta, $p_procedimiento, $p_producto, $p_diagnostico, $ipress_bene, $upss_bene,$receta_prescrita, $request->id_modalidad, $request->nomsexo, $request->fecnacafiliado, $request->codigo_upss,$adicional,$registrar_cita);
+    /*****************************Otros datos**************************************************************/
+    /*$temperatura                = $request->temperatura != '' ? $request->temperatura : 0;
+    $sa02_porcentaje            = $request->saturacion != '' ? $request->saturacion : 0;
+    $presion_arterial_x         = $request->presion_arterial_x != '' ? $request->presion_arterial_x : 0;
+    $presion_arterial_y        = $request->presion_arterial_y != '' ? $request->presion_arterial_y : 0;
+    $talla_cm                   = $request->talla != '' ? $request->talla : 0;
+    $tamano_cintura_cm          = $request->tamanio_cintura != '' ? $request->tamanio_cintura : 0;
+    $frecuencia_respiratoria    = $request->frecuencia_respiratoria != '' ? $request->frecuencia_respiratoria: 0;
+    $peso_kg                    = $request->peso != '' ? $request->peso: 0;
+    $frecuencia_cardiaca_fetal  = $request->frec_cardiaca_fetal != '' ? $request->frec_cardiaca_fetal : 0;
+    $frecuencia_cardiaca        = $request->frec_cardiaca != '' ? $request->frec_cardiaca : 0;
+    $fi02                       = $request->oxigenacion != '' ? $request->oxigenacion : 0;*/
+
+    /* Prestacion_eventos::create([
+      'id_prestacion' => $id_prestacion,
+      'evento_1' => $request->input("evento_1") ? 11 : null,
+      'evento_2' => $request->input("evento_2") ? 13 : null,
+      'evento_3' => $request->input("evento_3") ? 21 : null,
+      'evento_4' => $request->input("evento_4") ? 14 : null,
+      'evento_5' => $request->input("evento_5") ? 12 : null,
+      'evento_6' => $request->input("evento_6") ? 16 : null,
+      'evento_7' => $request->input("evento_7") ? 15 : null,
+      'evento_8' => $request->input("evento_8") ? 8 : null,
+      'estado' => 1,
+    ]); */
+
+    $eventosSeleccionados = $request->input('evento_ep', []); // eventos marcados en el formulario
+
+    $eventosSeleccionados = array_map('intval', $eventosSeleccionados);
+
+    $eventosExistentes = Prestacion_eventos::where('id_prestacion', $id_prestacion)->get();
+
+    foreach ($eventosExistentes as $evento) {
+        if (!in_array($evento->id_evento, $eventosSeleccionados)) {
+            $evento->estado = 0;
+            $evento->updated_us = Auth::id();
+            $evento->updated_at = date('Y-m-d H:i:s');
+            if (!$evento->save()):
+              throw new \Exception("Error al intentar registrar un (Prestacion_eventos).");
+            endif;
+        }
+    }
+
+    foreach ($eventosSeleccionados as $idEvento) {
+        $evento = null;
+        foreach ($eventosExistentes as $e) {
+            if ($e->id_evento == $idEvento) {
+                $evento = $e;
+                break;
+            }
+        }
+
+        if ($evento) {
+            if ($evento->estado != 1) {
+                $evento->estado = 1;
+                $evento->updated_us = Auth::id();
+                $evento->updated_at = date('Y-m-d H:i:s');
+                if (!$evento->save()):
+                  throw new \Exception("Error al actualizar un evento (Prestación evento).");
+                endif;
+            }
+        } else {
+            $registro = Prestacion_eventos::create([
+                'id_prestacion' => $id_prestacion,
+                'id_evento' => $idEvento,
+                'estado' => 1,
+                'created_us' => Auth::id(),
+            ]);
+
+            if (empty($registro)):
+              throw new \Exception("Error al registrar un evento (Prestación evento).");
+            endif;
+        }
+    }
+
+    if ($request -> signos_vitales_atencion_emergencia === "true") {
+      $temperatura                = $request->temperatura;
+      $sa02_porcentaje            = $request->saturacion;
+      $presion_arterial_x         = $request->presion_arterial_x;
+      $presion_arterial_y         = $request->presion_arterial_y;
+      $talla_cm                   = $request->talla;
+      $tamano_cintura_cm          = $request->tamanio_cintura;
+      $frecuencia_respiratoria    = $request->frecuencia_respiratoria;
+      $peso_kg                    = $request->peso;
+      $frecuencia_cardiaca_fetal  = $request->frec_cardiaca_fetal;
+      $frecuencia_cardiaca        = $request->frec_cardiaca;
+      $fi02                       = $request->oxigenacion;
+      $model_prestacion->adicionarDatosPrestacion($id_prestacion, $temperatura, $sa02_porcentaje, $presion_arterial_x, $presion_arterial_y, $talla_cm, $tamano_cintura_cm, $frecuencia_respiratoria, $peso_kg, $frecuencia_cardiaca_fetal, $frecuencia_cardiaca, $fi02, $request->motivo_visita, $request->tiempo_enfermedad,$request->t_enfermedad,$request->unidad_tiempo, $request->examen_clinico, $request->examen_auxiliar, $request->tratamiento_auxiliar, $request->plan_trabajo,$request->antecedente,$request->antecedente_familiar);
+    }
+
+    $temperatura                = 0;
+    $sa02_porcentaje            = 0;
+    $presion_arterial_x         = 0;
+    $presion_arterial_y         = 0;
+    $talla_cm                   = 0;
+    $tamano_cintura_cm          = 0;
+    $frecuencia_respiratoria    = 0;
+    $peso_kg                    = 0;
+    $frecuencia_cardiaca_fetal  = 0;
+    $frecuencia_cardiaca        = 0;
+    $fi02                       = 0;    
+    $model_prestacion->adicionarDatosPrestacion($id_prestacion, $temperatura, $sa02_porcentaje, $presion_arterial_x, $presion_arterial_y, $talla_cm, $tamano_cintura_cm, $frecuencia_respiratoria, $peso_kg, $frecuencia_cardiaca_fetal, $frecuencia_cardiaca, $fi02, $request->motivo_visita, $request->tiempo_enfermedad,$request->t_enfermedad,$request->unidad_tiempo, $request->examen_clinico, $request->examen_auxiliar, $request->tratamiento_auxiliar, $request->plan_trabajo,$request->antecedente,$request->antecedente_familiar);
+
+    /****************Actualiza Atencion Emergencia*********************************************/
+    // TODO: VALIDAR ESTRUCTURA DEL CODIGO SITEDS (CINCO CEROS AL INICIO Y LO DEMAS DEL 0 AL 9, EN TOTAL 12 DIGITOS)
+    // TODO: codigo siteds, dianostico, ubicacion, gestante
+
+    if($id_emergencia!=0):
+        $model_cama = new \App\Models\Cama;
+        $model_emergencia = new \App\Models\Emergencia;
+       if($request->id_prioridad<4 && !$request->flag_registro_alta): //prioridad <3
+          if (empty($request->id_cama) || $request->id_cama == 0) {
+            throw new \Exception("Debe seleccionar una cama o camilla.");
+          }
+
+          if (!$update):
+            throw new \Exception("Error al ocupar la Cama del paciente.");
+          endif;
+
+          $update=$model_emergencia->ActualizaUbicacionEstado($id_emergencia,$request->id_prioridad,$request->id_topico,$request->fecha_inicio,$request->appt,$request->id_cama);          
+
+          if (!$update):
+            throw new \Exception("Error al actualizar los datos donde se ubica el paciente en la Atención.");
+          endif;
+        else:
+          $emergencia = Emergencia::find($id_emergencia);
+          $emergencia->id_prioridad = $request->id_prioridad;
+          if (!$emergencia->save()):
+            throw new \Exception("Error al actualizar la prioridad en la Atención.");
+          endif;
+        endif;
+        $updateid=$model_prestacion->AgregarIdExt($id_prestacion,$id_emergencia);
+
+        if (!$updateid):
+          throw new \Exception("Error al enlazar el registro de la atención (Prestación) con la atención de Emergencia.");
+        endif;
+    endif;
+    /************INSERCION DE ID PRESTACION EN ENFERMERIA (SI TIENE UNA ENFERMERIA EXISTENTE CON EL ID_EXT, OSEA EL ID DE LA EMERGENCIA Y EL TIPO DE ATENCION 2)********************/
+    $prestacionRegistrada = Prestaciones::find($id_prestacion);
+    $enfermeriaExistente = Enfermeria::where("id_ext_enfermeria", $prestacionRegistrada->id_ext)->where("id_tipo_atencion", $prestacionRegistrada->id_tipo_atencion)->first();
+    if ($enfermeriaExistente) {
+      $enfermeriaExistente->id_prestacion = $id_prestacion;
+      if (!$enfermeriaExistente->save()):
+        throw new \Exception("Error al enlazar el registro de Enfermeria con la Atención de Emergencia.");
+      endif;
+    }
+    /*****************************FIN INSERCION**************************************************************/
+    
+    /****************GESTACION*********************************************/
+    $emergencia = Emergencia::find($id_emergencia);
+    $prestacion = Prestaciones::find($id_prestacion);
+    $prestacion -> id_gestacion = $emergencia -> id_gestacion;
+    $gestacion = Gestacion::find($emergencia -> id_gestacion);
+    //$gestacion -> duda;
+    //$gestacion -> fech_ult_regla;
+    //$gestacion -> fech_prob_parto;
+    //$gestacion -> semanas_gestacion;
+    //$gestacion -> num_controles;
+    //$gestacion -> save();
+    if (!$prestacion->save()):
+      throw new \Exception("Error al intentar enlazar la Prestación con los datos de la Gestación.");
+    endif;
+
+    //Actualizar codigos siteds en emergencia y cita
+    if (isset($request->cod_siteds_susalud)) {
+      $emergenciaUpdateSiteds = Emergencia::find($id_emergencia);
+      $emergenciaUpdateSiteds->cod_siteds_susalud = $request->cod_siteds_susalud;
+      $emergenciaUpdateSiteds->updated_at_cod_siteds = Carbon::now();
+      $emergenciaUpdateSiteds->updated_us_cod_siteds = Auth::user()->id;
+      if (!$emergenciaUpdateSiteds->save()):
+        throw new \Exception("Error al intentar actualizar los datos del SITEDS de la Atención de emergencia.");
+      endif;
+
+      $citaUpdatedSiteds = Cita::find($id_cita);
+      $citaUpdatedSiteds->codigo_siteds = $request->cod_siteds_susalud;
+      $citaUpdatedSiteds->updated_at_cod_siteds = Carbon::now();
+      $citaUpdatedSiteds->updated_us_cod_siteds = Auth::user()->id;
+      if (!$citaUpdatedSiteds->save()):
+        throw new \Exception("Error al intentar actualizar los datos del SITEDS del registro de cita interno de la Atención de emergencia.");
+      endif;
+    }
+
+    /****************PUERPERIO*********************************************/
+    $puerperio = $request -> fecha_parto == null ? false : true;
+    $fecha_parto_real = $request -> fecha_parto;
+    $hora_parto_real = $request -> hora_parto;
+    $tipo_parto = $request -> tipo_parto;
+    $complicacion_parto = $request -> complicacion_parto == 1 ? "SIN COMPLICACIONES" : "COMPLICADO";
+    $observacion_parto = $request -> descripcion_parto;
+    // Puerperio natis
+    $estados_vida = $request -> estado_vida_puerpera;
+    $tipo_docs = $request -> tipo_documento_puerpera;
+    $dnis = $request -> numero_documento_puerpera;
+    $sexos = $request -> sexo_puerpera;
+    $pesos = $request -> peso_puerpera;
+    $tallas = $request -> talla_puerpera;
+    
+    error_log($puerperio);
+    error_log($fecha_parto_real);
+    error_log($hora_parto_real);
+    error_log($tipo_parto);
+    error_log($complicacion_parto);
+    error_log($observacion_parto);
+    // Array de matrices que contienen toda la data ingresada para nada nacido:
+    $natis = [];
+    for ($i = 0; $i < sizeof($dnis); $i++) {
+      $data = [$estados_vida[$i], $tipo_docs[$i], $dnis[$i], $sexos[$i], $pesos[$i], $tallas[$i]];
+      array_push($natis, $data);
+    }
+    for ($i = 0; $i < sizeof($natis); $i++) {
+      error_log(implode($natis[$i]));
+    }
+    error_log(implode(array($request)));
+
+    $puerperioEncontrado = null;
+    if ($request -> id_puerperio) {
+      $puerperioEncontrado = Puerperio::find($request -> id_puerperio);
+    }
+
+    // SI O SI DEBE HABER UN NATI MINIMO
+    
+    if ($puerperio == 1) {
+      if (sizeof($natis) == 0) {
+        Session::flash('flash_message', 'No puede registrar una prestacion con informacion de puerperio incompleta.');
+        return redirect('/formulario_atencion_emergencia/'.$id_emergencia);
+      }
+      $paciente = Asegurado::find($id_asegurado);
+      $paciente->estadios_salud_materna = '3';
+      $paciente->update_estadios_salud_materna = Carbon::now();
+      $paciente->id_prestacion_estadios_salud_materna = $prestacion->id;
+      $paciente->id_secuencia_estadios_salud_materna = '3';
+      if (!$paciente->save()):
+        throw new \Exception("Error al intentar actualizar los datos de salud materna del paciente.");
+      endif;
+      if ($puerperioEncontrado == null) {
+        $model_puerperia = new \App\Models\Puerperio;
+        $model_puerperia -> fecha_parto = $fecha_parto_real." ".$hora_parto_real;
+        $model_puerperia -> id_tipo_parto = $request -> tipo_parto;
+        $model_puerperia -> complicaciones = $complicacion_parto;
+        $model_puerperia -> descripcion = $observacion_parto;
+        if (!$model_puerperia->save()):
+          throw new \Exception("Error al intentar registrar los datos de Puerperio.");
+        endif;
+
+        $emergencia = Emergencia::find(Prestaciones::find($id_prestacion)->id_ext);
+        error_log("id emergencia para la prestacion: ".(string)$emergencia->id);
+        $emergencia -> id_puerperio = $model_puerperia -> id;
+        if (!$emergencia->save()):
+          throw new \Exception("Error al intentar enlazar los datos de Puerperio con la Atención de emergencia.");
+        endif;
+
+        for ($i = 0; $i < sizeof($natis); $i++) {
+          $model_nati = new \App\Models\Nati;
+          $model_nati -> id_puerperio = $model_puerperia -> id;
+          $model_nati -> estado = $natis[$i][0]; // primer dato, es el estado
+          $model_nati -> id_tipo_doc_nati = $natis[$i][1]; // tipo_doc
+          $model_nati -> num_doc = $natis[$i][2];
+          $model_nati -> sexo = $natis[$i][3];
+          $model_nati -> peso = $natis[$i][4];
+          $model_nati -> talla = $natis[$i][5];
+          if (!$model_nati->save()):
+            throw new \Exception("Error al intentar registrar los datos (Nati 1).");
+          endif;
+        }
+      } else {
+        for ($i = 0; $i < sizeof($natis); $i++) {
+          $model_nati = new \App\Models\Nati;
+          $model_nati -> id_puerperio = $puerperioEncontrado -> id;
+          $model_nati -> estado = $natis[$i][0]; // primer dato, es el estado
+          $model_nati -> id_tipo_doc_nati = $natis[$i][1]; // tipo_doc
+          $model_nati -> num_doc = $natis[$i][2];
+          $model_nati -> sexo = $natis[$i][3];
+          $model_nati -> peso = $natis[$i][4];
+          $model_nati -> talla = $natis[$i][5];
+          error_log($natis[$i][4]);
+          error_log($natis[$i][5]);
+          if (!$model_nati->save()):
+            throw new \Exception("Error al intentar registrar los datos (Nati 2).");
+          endif;
+        }
+      }
+    }
+    /****************FIN PUERPERIO*********************************************/
+    $model_procedimiento = new \App\Models\Procedimiento;
+    if (isset($request->id_examen_lab)) :
+      $p_laboratorio = "";
+      $p_laboratorio .= "{";
+      foreach ($request->id_examen_lab as $key => $value) :
+        if ($request->id_examen_lab[$key] != "") {
+          $p_laboratorio .= "{";
+          $p_laboratorio .= $request->id_examen_lab[$key] . ",";
+          if (intval($request->id_nivel) === 3):
+            $p_laboratorio .= "0";
+          else:
+          $p_laboratorio .= (isset($request->examen_lab_observacion[$key]) && $request->examen_lab_observacion[$key] !="") ? str_replace($search, $replace, $request->examen_lab_observacion[$key]) : "0";
+          endif;
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->examen_lab_cantidad[$key]) && $request->examen_lab_cantidad[$key] > 0) ? $request->examen_lab_cantidad[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->miSelectLab[$key]) && $request->miSelectLab[$key] !="") ? $request->miSelectLab[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->descripcion_tipo_muestra[$key]) && $request->descripcion_tipo_muestra[$key] !="") ? $request->descripcion_tipo_muestra[$key] : "0";
+          /** EXAMEN PARA HEMOCULTIVO PARA ADULTO */
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_adulto_fecha_tiempo_enfermedad[$key]) && $request->des_adulto_fecha_tiempo_enfermedad[$key] !="") ? $request->des_adulto_fecha_tiempo_enfermedad[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_adulto_respuesta_ocular[$key]) && $request->des_adulto_respuesta_ocular[$key] !="") ? $request->des_adulto_respuesta_ocular[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_adulto_respuesta_verbal[$key]) && $request->des_adulto_respuesta_verbal[$key] !="") ? $request->des_adulto_respuesta_verbal[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_adulto_respuesta_motora[$key]) && $request->des_adulto_respuesta_motora[$key] !="") ? $request->des_adulto_respuesta_motora[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_adulto_total_escala_glasgow[$key]) && $request->des_adulto_total_escala_glasgow[$key] !="") ? $request->des_adulto_total_escala_glasgow[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_adulto_presion_arterial_x[$key]) && $request->des_adulto_presion_arterial_x[$key] !="") ? $request->des_adulto_presion_arterial_x[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_adulto_presion_arterial_y[$key]) && $request->des_adulto_presion_arterial_y[$key] !="") ? $request->des_adulto_presion_arterial_y[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_adulto_frecuencia_cardiaca[$key]) && $request->des_adulto_frecuencia_cardiaca[$key] !="") ? $request->des_adulto_frecuencia_cardiaca[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_adulto_frecuencia_respiratorio[$key]) && $request->des_adulto_frecuencia_respiratorio[$key] !="") ? $request->des_adulto_frecuencia_respiratorio[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_adulto_temperatura[$key]) && $request->des_adulto_temperatura[$key] !="") ? $request->des_adulto_temperatura[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_adulto_creatinina[$key]) && $request->des_adulto_creatinina[$key] !="") ? $request->des_adulto_creatinina[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_adulto_diuresis[$key]) && $request->des_adulto_diuresis[$key] !="") ? $request->des_adulto_diuresis[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_adulto_procalcitonina[$key]) && $request->des_adulto_procalcitonina[$key] !="") ? $request->des_adulto_procalcitonina[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_adulto_pcr[$key]) && $request->des_adulto_pcr[$key] !="") ? $request->des_adulto_pcr[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_adulto_fiO2[$key]) && $request->des_adulto_fiO2[$key] !="") ? $request->des_adulto_fiO2[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_adulto_leucocitos[$key]) && $request->des_adulto_leucocitos[$key] !="") ? $request->des_adulto_leucocitos[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_adulto_plaquetas[$key]) && $request->des_adulto_plaquetas[$key] !="") ? $request->des_adulto_plaquetas[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_adulto_bilirrubina[$key]) && $request->des_adulto_bilirrubina[$key] !="") ? $request->des_adulto_bilirrubina[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_adulto_ima[$key]) && $request->des_adulto_ima[$key] !="") ? $request->des_adulto_ima[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_adulto_icc[$key]) && $request->des_adulto_icc[$key] !="") ? $request->des_adulto_icc[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_adulto_evp[$key]) && $request->des_adulto_evp[$key] !="") ? $request->des_adulto_evp[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_adulto_ecv[$key]) && $request->des_adulto_ecv[$key] !="") ? $request->des_adulto_ecv[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_adulto_demencia[$key]) && $request->des_adulto_demencia[$key] !="") ? $request->des_adulto_demencia[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_adulto_dm[$key]) && $request->des_adulto_dm[$key] !="") ? $request->des_adulto_dm[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_adulto_diabetes_lesion_organica[$key]) && $request->des_adulto_diabetes_lesion_organica[$key] !="") ? $request->des_adulto_diabetes_lesion_organica[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_adulto_hemiplejia[$key]) && $request->des_adulto_hemiplejia[$key] !="") ? $request->des_adulto_hemiplejia[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_adulto_epoc[$key]) && $request->des_adulto_epoc[$key] !="") ? $request->des_adulto_epoc[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_adulto_patologia_tejido_conectivo[$key]) && $request->des_adulto_patologia_tejido_conectivo[$key] !="") ? $request->des_adulto_patologia_tejido_conectivo[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_adulto_enfermedad_ulcerosa[$key]) && $request->des_adulto_enfermedad_ulcerosa[$key] !="") ? $request->des_adulto_enfermedad_ulcerosa[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_adulto_patologia_renal_moderada_o_grave[$key]) && $request->des_adulto_patologia_renal_moderada_o_grave[$key] !="") ? $request->des_adulto_patologia_renal_moderada_o_grave[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_adulto_neoplasias[$key]) && $request->des_adulto_neoplasias[$key] !="") ? $request->des_adulto_neoplasias[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_adulto_neoplasias_especifique[$key]) && $request->des_adulto_neoplasias_especifique[$key] !="") ? $request->des_adulto_neoplasias_especifique[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_adulto_leucemias[$key]) && $request->des_adulto_leucemias[$key] !="") ? $request->des_adulto_leucemias[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_adulto_leucemias_especifique[$key]) && $request->des_adulto_leucemias_especifique[$key] !="") ? $request->des_adulto_leucemias_especifique[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_adulto_linfomas_malignos[$key]) && $request->des_adulto_linfomas_malignos[$key] !="") ? $request->des_adulto_linfomas_malignos[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_adulto_metastasis_colida[$key]) && $request->des_adulto_metastasis_colida[$key] !="") ? $request->des_adulto_metastasis_colida[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_adulto_sida[$key]) && $request->des_adulto_sida[$key] !="") ? $request->des_adulto_sida[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_adulto_antecedentes_patologicos_otros_1[$key]) && $request->des_adulto_antecedentes_patologicos_otros_1[$key] !="") ? $request->des_adulto_antecedentes_patologicos_otros_1[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_adulto_antecedentes_patologicos_otros_1_especifique[$key]) && $request->des_adulto_antecedentes_patologicos_otros_1_especifique[$key] !="") ? $request->des_adulto_antecedentes_patologicos_otros_1_especifique[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_adulto_antecedentes_patologicos_otros_2[$key]) && $request->des_adulto_antecedentes_patologicos_otros_2[$key] !="") ? $request->des_adulto_antecedentes_patologicos_otros_2[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_adulto_antecedentes_patologicos_otros_2_especifique[$key]) && $request->des_adulto_antecedentes_patologicos_otros_2_especifique[$key] !="") ? $request->des_adulto_antecedentes_patologicos_otros_2_especifique[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_adulto_terapia_antimicrobiana[$key]) && $request->des_adulto_terapia_antimicrobiana[$key] !="") ? $request->des_adulto_terapia_antimicrobiana[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_adulto_frasco_1[$key]) && $request->des_adulto_frasco_1[$key] !="") ? $request->des_adulto_frasco_1[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_adulto_frasco_1_opcion_1[$key]) && $request->des_adulto_frasco_1_opcion_1[$key] !="") ? $request->des_adulto_frasco_1_opcion_1[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_adulto_frasco_1_opcion_2[$key]) && $request->des_adulto_frasco_1_opcion_2[$key] !="") ? $request->des_adulto_frasco_1_opcion_2[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_adulto_frasco_2[$key]) && $request->des_adulto_frasco_2[$key] !="") ? $request->des_adulto_frasco_2[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_adulto_frasco_2_opcion_1[$key]) && $request->des_adulto_frasco_2_opcion_1[$key] !="") ? $request->des_adulto_frasco_2_opcion_1[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_adulto_frasco_2_opcion_2[$key]) && $request->des_adulto_frasco_2_opcion_2[$key] !="") ? $request->des_adulto_frasco_2_opcion_2[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_adulto_frasco_3[$key]) && $request->des_adulto_frasco_3[$key] !="") ? $request->des_adulto_frasco_3[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_adulto_frasco_3_opcion_1[$key]) && $request->des_adulto_frasco_3_opcion_1[$key] !="") ? $request->des_adulto_frasco_3_opcion_1[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_adulto_frasco_3_opcion_2[$key]) && $request->des_adulto_frasco_3_opcion_2[$key] !="") ? $request->des_adulto_frasco_3_opcion_2[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_adulto_hemocultivo_seguimiento_y_vigilancia[$key]) && $request->des_adulto_hemocultivo_seguimiento_y_vigilancia[$key] !="") ? $request->des_adulto_hemocultivo_seguimiento_y_vigilancia[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_adulto_fecha_primer_resultado_hemocultivo[$key]) && $request->des_adulto_fecha_primer_resultado_hemocultivo[$key] !="") ? $request->des_adulto_fecha_primer_resultado_hemocultivo[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->flag_solicitud_examen_especializados_hemocultivo_adulto[$key]) && $request->flag_solicitud_examen_especializados_hemocultivo_adulto[$key] !="") ? $request->flag_solicitud_examen_especializados_hemocultivo_adulto[$key] : "0";
+          /******************************************************* EXAMEN PARA HEMOCULTIVO PARA NEONATO Y PEDRIATRÍA *******************************************************/
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->descripcion_examen[$key]) && $request->descripcion_examen[$key] !="") ? $request->descripcion_examen[$key] : "0"; /** NOMBRE O DESCRIPCIÓN DEL EXAMEN ESPECIALIZADO */
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_pedriatria_fecha_tiempo_enfermedad[$key]) && $request->des_pedriatria_fecha_tiempo_enfermedad[$key] !="") ? $request->des_pedriatria_fecha_tiempo_enfermedad[$key] : "0";
+          /** EDAD GESTIONAL **/
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_pedriatria_postermino[$key]) && $request->des_pedriatria_postermino[$key] !="") ? $request->des_pedriatria_postermino[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_pedriatria_termino[$key]) && $request->des_pedriatria_termino[$key] !="") ? $request->des_pedriatria_termino[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_pedriatria_prematuro_leve[$key]) && $request->des_pedriatria_prematuro_leve[$key] !="") ? $request->des_pedriatria_prematuro_leve[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_pedriatria_prematuro_moderado[$key]) && $request->des_pedriatria_prematuro_moderado[$key] !="") ? $request->des_pedriatria_prematuro_moderado[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_pedriatria_prematuro_extremo[$key]) && $request->des_pedriatria_prematuro_extremo[$key] !="") ? $request->des_pedriatria_prematuro_extremo[$key] : "0";
+          /** APGAR **/
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_pedriatria_apariencia[$key]) && $request->des_pedriatria_apariencia[$key] !="") ? $request->des_pedriatria_apariencia[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_pedriatria_pulso[$key]) && $request->des_pedriatria_pulso[$key] !="") ? $request->des_pedriatria_pulso[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_pedriatria_gesto[$key]) && $request->des_pedriatria_gesto[$key] !="") ? $request->des_pedriatria_gesto[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_pedriatria_actividad_respiratoria[$key]) && $request->des_pedriatria_actividad_respiratoria[$key] !="") ? $request->des_pedriatria_actividad_respiratoria[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_pedriatria_total_apgar[$key]) && $request->des_pedriatria_total_apgar[$key] !="") ? $request->des_pedriatria_total_apgar[$key] : "0";
+          /** ESCALA DE GLASGOW **/
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_pedriatria_respuesta_ocular[$key]) && $request->des_pedriatria_respuesta_ocular[$key] !="") ? $request->des_pedriatria_respuesta_ocular[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_pedriatria_respuesta_verbal[$key]) && $request->des_pedriatria_respuesta_verbal[$key] !="") ? $request->des_pedriatria_respuesta_verbal[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_pedriatria_respuesta_motora[$key]) && $request->des_pedriatria_respuesta_motora[$key] !="") ? $request->des_pedriatria_respuesta_motora[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_pedriatria_total_escala_glasgow[$key]) && $request->des_pedriatria_total_escala_glasgow[$key] !="") ? $request->des_pedriatria_total_escala_glasgow[$key] : "0";
+          /** SIGNOS VITALES **/
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_pedriatria_presion_arterial_x[$key]) && $request->des_pedriatria_presion_arterial_x[$key] !="") ? $request->des_pedriatria_presion_arterial_x[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_pedriatria_presion_arterial_y[$key]) && $request->des_pedriatria_presion_arterial_y[$key] !="") ? $request->des_pedriatria_presion_arterial_y[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_pedriatria_frecuencia_cardiaca[$key]) && $request->des_pedriatria_frecuencia_cardiaca[$key] !="") ? $request->des_pedriatria_frecuencia_cardiaca[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_pedriatria_frecuencia_respiratorio[$key]) && $request->des_pedriatria_frecuencia_respiratorio[$key] !="") ? $request->des_pedriatria_frecuencia_respiratorio[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_pedriatria_temperatura[$key]) && $request->des_pedriatria_temperatura[$key] !="") ? $request->des_pedriatria_temperatura[$key] : "0";
+          /** EXÁMENES DE LABORATORIO **/
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_pedriatria_creatinina[$key]) && $request->des_pedriatria_creatinina[$key] !="") ? $request->des_pedriatria_creatinina[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_pedriatria_diuresis[$key]) && $request->des_pedriatria_diuresis[$key] !="") ? $request->des_pedriatria_diuresis[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_pedriatria_procalcitonina[$key]) && $request->des_pedriatria_procalcitonina[$key] !="") ? $request->des_pedriatria_procalcitonina[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_pedriatria_pcr[$key]) && $request->des_pedriatria_pcr[$key] !="") ? $request->des_pedriatria_pcr[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_pedriatria_fiO2[$key]) && $request->des_pedriatria_fiO2[$key] !="") ? $request->des_pedriatria_fiO2[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_pedriatria_leucocitos[$key]) && $request->des_pedriatria_leucocitos[$key] !="") ? $request->des_pedriatria_leucocitos[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_pedriatria_plaquetas[$key]) && $request->des_pedriatria_plaquetas[$key] !="") ? $request->des_pedriatria_plaquetas[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_pedriatria_bilirrubina[$key]) && $request->des_pedriatria_bilirrubina[$key] !="") ? $request->des_pedriatria_bilirrubina[$key] : "0";
+          
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_pedriatria_glucosa[$key]) && $request->des_pedriatria_glucosa[$key] !="") ? $request->des_pedriatria_glucosa[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_pedriatria_alt[$key]) && $request->des_pedriatria_alt[$key] !="") ? $request->des_pedriatria_alt[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_pedriatria_vcg[$key]) && $request->des_pedriatria_vcg[$key] !="") ? $request->des_pedriatria_vcg[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_pedriatria_tp[$key]) && $request->des_pedriatria_tp[$key] !="") ? $request->des_pedriatria_tp[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_pedriatria_sodio[$key]) && $request->des_pedriatria_sodio[$key] !="") ? $request->des_pedriatria_sodio[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_pedriatria_potasio[$key]) && $request->des_pedriatria_potasio[$key] !="") ? $request->des_pedriatria_potasio[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_pedriatria_calcio[$key]) && $request->des_pedriatria_calcio[$key] !="") ? $request->des_pedriatria_calcio[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_pedriatria_pco2[$key]) && $request->des_pedriatria_pco2[$key] !="") ? $request->des_pedriatria_pco2[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_pedriatria_tpta[$key]) && $request->des_pedriatria_tpta[$key] !="") ? $request->des_pedriatria_tpta[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_pedriatria_examen_laboratorio_otros[$key]) && $request->des_pedriatria_examen_laboratorio_otros[$key] !="") ? $request->des_pedriatria_examen_laboratorio_otros[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_pedriatria_examen_laboratorio_otros_especifique[$key]) && $request->des_pedriatria_examen_laboratorio_otros_especifique[$key] !="") ? $request->des_pedriatria_examen_laboratorio_otros_especifique[$key] : "0";
+          /** TERAPIA ANTIMICROBIANA **/
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_pedriatria_terapia_antimicrobiana[$key]) && $request->des_pedriatria_terapia_antimicrobiana[$key] !="") ? $request->des_pedriatria_terapia_antimicrobiana[$key] : "0";
+          /** SOLICITUD DE FRASCO DE HEMOCULTIVO **/
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_pedriatria_frasco_1[$key]) && $request->des_pedriatria_frasco_1[$key] !="") ? $request->des_pedriatria_frasco_1[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_pedriatria_frasco_1_opcion_1[$key]) && $request->des_pedriatria_frasco_1_opcion_1[$key] !="") ? $request->des_pedriatria_frasco_1_opcion_1[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_pedriatria_frasco_1_opcion_2[$key]) && $request->des_pedriatria_frasco_1_opcion_2[$key] !="") ? $request->des_pedriatria_frasco_1_opcion_2[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_pedriatria_frasco_2[$key]) && $request->des_pedriatria_frasco_2[$key] !="") ? $request->des_pedriatria_frasco_2[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_pedriatria_frasco_2_opcion_1[$key]) && $request->des_pedriatria_frasco_2_opcion_1[$key] !="") ? $request->des_pedriatria_frasco_2_opcion_1[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_pedriatria_frasco_2_opcion_2[$key]) && $request->des_pedriatria_frasco_2_opcion_2[$key] !="") ? $request->des_pedriatria_frasco_2_opcion_2[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_pedriatria_frasco_3[$key]) && $request->des_pedriatria_frasco_3[$key] !="") ? $request->des_pedriatria_frasco_3[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_pedriatria_frasco_3_opcion_1[$key]) && $request->des_pedriatria_frasco_3_opcion_1[$key] !="") ? $request->des_pedriatria_frasco_3_opcion_1[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_pedriatria_frasco_3_opcion_2[$key]) && $request->des_pedriatria_frasco_3_opcion_2[$key] !="") ? $request->des_pedriatria_frasco_3_opcion_2[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_pedriatria_hemocultivo_seguimiento_y_vigilancia[$key]) && $request->des_pedriatria_hemocultivo_seguimiento_y_vigilancia[$key] !="") ? $request->des_pedriatria_hemocultivo_seguimiento_y_vigilancia[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_pedriatria_fecha_primer_resultado_hemocultivo[$key]) && $request->des_pedriatria_fecha_primer_resultado_hemocultivo[$key] !="") ? $request->des_pedriatria_fecha_primer_resultado_hemocultivo[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->flag_solicitud_examen_especializados_hemocultivo_pedriatria[$key]) && $request->flag_solicitud_examen_especializados_hemocultivo_pedriatria[$key] !="") ? $request->flag_solicitud_examen_especializados_hemocultivo_pedriatria[$key] : "0";
+          $p_laboratorio .= ",";
+          // ====================== SOLICITUD PARA ESTUDIO CITOQUÍMICO LÍQUIDOS BIOLÓGICOS  ===============================================
+          $p_laboratorio .= (isset($request->des_antecedentes_patologicos_personales[$key]) && $request->des_antecedentes_patologicos_personales[$key] !="") ? $request->des_antecedentes_patologicos_personales[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_antecedentes_patologicos_familiares[$key]) && $request->des_antecedentes_patologicos_familiares[$key] !="") ? $request->des_antecedentes_patologicos_familiares[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_liquido_cefaloraquideo[$key]) && $request->des_liquido_cefaloraquideo[$key] !="") ? $request->des_liquido_cefaloraquideo[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_liquido_pleural[$key]) && $request->des_liquido_pleural[$key] !="") ? $request->des_liquido_pleural[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_liquido_ascitico[$key]) && $request->des_liquido_ascitico[$key] !="") ? $request->des_liquido_ascitico[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_liquido_sinovial[$key]) && $request->des_liquido_sinovial[$key] !="") ? $request->des_liquido_sinovial[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_liquido_otro[$key]) && $request->des_liquido_otro[$key] !="") ? $request->des_liquido_otro[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_liquido_otro_especifique[$key]) && $request->des_liquido_otro_especifique[$key] !="") ? $request->des_liquido_otro_especifique[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_num_frasco_muestra_opcion[$key]) && $request->des_num_frasco_muestra_opcion[$key] !="") ? $request->des_num_frasco_muestra_opcion[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->flag_solicitud_citoquimicos_liquidos_biologicos[$key]) && $request->flag_solicitud_citoquimicos_liquidos_biologicos[$key] !="") ? $request->flag_solicitud_citoquimicos_liquidos_biologicos[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_pedriatria_tono_muscular[$key]) && $request->des_pedriatria_tono_muscular[$key] !="") ? $request->des_pedriatria_tono_muscular[$key] : "0";
+          /******************************************************* SOLICITUD TEST DE TOLERANCIA A LA GLUCOSA ORAL *******************************************************/
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_tolerancia_paciente_pediatrico_ttgo[$key]) && $request->des_tolerancia_paciente_pediatrico_ttgo[$key] !="") ? $request->des_tolerancia_paciente_pediatrico_ttgo[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_fecha_tolerancia_paciente_pediatrico_ttgo[$key]) && $request->des_fecha_tolerancia_paciente_pediatrico_ttgo[$key] !="") ? $request->des_fecha_tolerancia_paciente_pediatrico_ttgo[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_tolerancia_paciente_pediatrico_glucosa_anhidra[$key]) && $request->des_tolerancia_paciente_pediatrico_glucosa_anhidra[$key] !="") ? $request->des_tolerancia_paciente_pediatrico_glucosa_anhidra[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_cantidad_tolerancia_paciente_pediatrico_glucosa_anhidra[$key]) && $request->des_cantidad_tolerancia_paciente_pediatrico_glucosa_anhidra[$key] !="") ? $request->des_cantidad_tolerancia_paciente_pediatrico_glucosa_anhidra[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_tolerancia_paciente_adulto_ttgo[$key]) && $request->des_tolerancia_paciente_adulto_ttgo[$key] !="") ? $request->des_tolerancia_paciente_adulto_ttgo[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_fecha_tolerancia_paciente_adulto_ttgo[$key]) && $request->des_fecha_tolerancia_paciente_adulto_ttgo[$key] !="") ? $request->des_fecha_tolerancia_paciente_adulto_ttgo[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_tolerancia_paciente_adulto_glucosa_anhidra[$key]) && $request->des_tolerancia_paciente_adulto_glucosa_anhidra[$key] !="") ? $request->des_tolerancia_paciente_adulto_glucosa_anhidra[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_cantidad_tolerancia_paciente_adulto_glucosa_anhidra[$key]) && $request->des_cantidad_tolerancia_paciente_adulto_glucosa_anhidra[$key] !="") ? $request->des_cantidad_tolerancia_paciente_adulto_glucosa_anhidra[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_tolerancia_paciente_gestante_g[$key]) && $request->des_tolerancia_paciente_gestante_g[$key] !="") ? $request->des_tolerancia_paciente_gestante_g[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_tolerancia_paciente_gestante_p_1[$key]) && $request->des_tolerancia_paciente_gestante_p_1[$key] !="") ? $request->des_tolerancia_paciente_gestante_p_1[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_tolerancia_paciente_gestante_p_2[$key]) && $request->des_tolerancia_paciente_gestante_p_2[$key] !="") ? $request->des_tolerancia_paciente_gestante_p_2[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_tolerancia_paciente_gestante_p_3[$key]) && $request->des_tolerancia_paciente_gestante_p_3[$key] !="") ? $request->des_tolerancia_paciente_gestante_p_3[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_tolerancia_paciente_gestante_p_4[$key]) && $request->des_tolerancia_paciente_gestante_p_4[$key] !="") ? $request->des_tolerancia_paciente_gestante_p_4[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_tolerancia_paciente_gestante_edad_gestacional_meses[$key]) && $request->des_tolerancia_paciente_gestante_edad_gestacional_meses[$key] !="") ? $request->des_tolerancia_paciente_gestante_edad_gestacional_meses[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_tolerancia_paciente_gestante_edad_gestacional_semanas[$key]) && $request->des_tolerancia_paciente_gestante_edad_gestacional_semanas[$key] !="") ? $request->des_tolerancia_paciente_gestante_edad_gestacional_semanas[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_tolerancia_paciente_gestante_edad_gestacional_dias[$key]) && $request->des_tolerancia_paciente_gestante_edad_gestacional_dias[$key] !="") ? $request->des_tolerancia_paciente_gestante_edad_gestacional_dias[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_tolerancia_paciente_gestante_ttgo[$key]) && $request->des_tolerancia_paciente_gestante_ttgo[$key] !="") ? $request->des_tolerancia_paciente_gestante_ttgo[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_fecha_tolerancia_paciente_gestante_ttgo[$key]) && $request->des_fecha_tolerancia_paciente_gestante_ttgo[$key] !="") ? $request->des_fecha_tolerancia_paciente_gestante_ttgo[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_tolerancia_paciente_gestante_glucosa_anhidra[$key]) && $request->des_tolerancia_paciente_gestante_glucosa_anhidra[$key] !="") ? $request->des_tolerancia_paciente_gestante_glucosa_anhidra[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_cantidad_tolerancia_paciente_gestante_glucosa_anhidra[$key]) && $request->des_cantidad_tolerancia_paciente_gestante_glucosa_anhidra[$key] !="") ? $request->des_cantidad_tolerancia_paciente_gestante_glucosa_anhidra[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_tolerancia_paciente_gestante_factores_riesgo[$key]) && $request->des_tolerancia_paciente_gestante_factores_riesgo[$key] !="") ? $request->des_tolerancia_paciente_gestante_factores_riesgo[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_especifique_tolerancia_paciente_gestante_factores_riesgo[$key]) && $request->des_especifique_tolerancia_paciente_gestante_factores_riesgo[$key] !="") ? $request->des_especifique_tolerancia_paciente_gestante_factores_riesgo[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->flag_solicitud_test_tolerancia_glucosa_oral[$key]) && $request->flag_solicitud_test_tolerancia_glucosa_oral[$key] !="") ? $request->flag_solicitud_test_tolerancia_glucosa_oral[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= "0";
+          $p_laboratorio .= "},";
+        }
+      endforeach;
+      if (strlen($p_laboratorio) > 1) $p_laboratorio = substr($p_laboratorio, 0, -1);
+      $p_laboratorio .= "}";
+      if($request->id_examen_lab[0]!=""):
+        if (intval($request->id_establecimiento) === 76):
+
+          $has_observacion_unica = (intval($request->id_nivel) === 3) ? 1 : 0;
+          $id_evaluacion = 0;
+          $id_interconsulta = 0;
+          $id_servicio = 76;
+          $lab_orden_observacion_unica = intval($request->id_nivel) === 3 ? $request->lab_orden_observacion : null;
+          $flag_cq = 0;
+          $id_hora_toma_muestra = null;
+          
+          $id_procedimiento_lab = $model_procedimiento->RegistrarLaboratorioOrden3($request->id_user, $id_prestacion, $request->id_establecimiento, $fecha_hora_atencion, $p_laboratorio, $has_observacion_unica, $id_evaluacion, $request->id_farmacia, $id_interconsulta, $request->id_tipo_atencion, $id_servicio, $request->id_topico, $request->id_cama, $request->id_medico, $id_asegurado, $lab_orden_observacion_unica, $flag_cq, $id_hora_toma_muestra);
+        else:
+          $id_procedimiento_lab = $model_procedimiento->RegistrarLaboratorioOrden2($request->id_user, $id_prestacion, $request->id_establecimiento, $fecha_cita, $p_laboratorio, 2, 0, $request->id_farmacia, 0, $request->id_tipo_atencion, 76, $request->id_topico, $request->id_cama, $request->id_medico, $id_asegurado);
+        endif;
+      endif;
+      foreach ($request->id_examen_lab as $keyExamen => $examenLab) :
+        $respuesta_urocultivo = $request->respuesta_urocultivo[$keyExamen];
+        if (isset($respuesta_urocultivo) && !empty($respuesta_urocultivo)) {
+          $id_procedimiento = $request->id_procedimiento_lab[$keyExamen];
+
+          $updatePrestacionProc =  Prestacion_procedimiento::where('id_prestacion', $id_prestacion)->where('id_procedimiento', $id_procedimiento)->first();
+          $filas_afectadas_upd_pres_proc = $updatePrestacionProc->update([
+              'respuestas_urocultivo' => json_decode($respuesta_urocultivo, true)
+          ]);
+
+          if ($filas_afectadas_upd_pres_proc === 0):
+            throw new \Exception("Error al intentar actualizar un registro de Respuesta de Urocultivo.");
+          endif;
+        }
+      endforeach;
+    endif;
+
+    //insertar procedimientos x diagnosticos
+
+    if(isset($request->id_procedimiento)):
+      if(isset($request->miSelect)):
+        $arrayprocedimientos=$request->id_procedimiento;
+        $arraydiagnosticos=$request->miSelect;
+        for($iterador=0;$iterador<count($arrayprocedimientos);$iterador++){
+   
+          $model_procedimiento_metodos = new \App\Models\Procedimiento;
+          $idprocedimiento= $arrayprocedimientos[$iterador];
+         
+          $iddiagnostico = $arraydiagnosticos[$iterador];
+      
+          $idprestacionxDiagProc = $id_prestacion;
+          $mensajeSucess = $model_procedimiento_metodos->RegistrarProcedimientoxDiagnostico($idprestacionxDiagProc,$idprocedimiento,$iddiagnostico,1);  
+        }
+
+      endif;
+    endif;
+    /*function escape_pg_value($value) {
+    if ($value === null || $value === '') return 'NULL';
+    if (is_numeric($value)) return $value;
+    $escaped = str_replace(['\\', '"'], ['\\\\', '\\"'], $value);
+    return '"' . $escaped . '"';
+    }*/
+    if (isset($request->id_examen_rad)) :   
+      $p_radiologia = "";
+      $p_radiologia .= "{";
+      foreach ($request->id_examen_rad as $key => $value) :
+        if ($request->id_examen_rad[$key] != "") {
+          $p_radiologia .= "{";
+          $p_radiologia .= $request->id_examen_rad[$key] . ",";
+          $p_radiologia .= (isset($request->examen_rad_cantidad[$key]) && $request->examen_rad_cantidad[$key] > 0) ? $request->examen_rad_cantidad[$key] : "0";
+          $p_radiologia .= ",";
+          $p_radiologia .= (isset($request->examen_rad_observacion[$key]) && $request->examen_rad_observacion[$key] !="") ? str_replace($search, $replace, $request->examen_rad_observacion[$key]) : 'NULL';
+          $p_radiologia .= ",";
+          $p_radiologia .= (isset($request->id_comparativo[$key]) && $request->id_comparativo[$key] !="") ? $request->id_comparativo[$key] : "0";
+          $p_radiologia .= ",";
+          $p_radiologia .= (isset($request->id_lado[$key]) && $request->id_lado[$key] !="") ? $request->id_lado[$key] : "0";
+          $p_radiologia .= ",";
+          $p_radiologia .= (isset($request->miSelectRad[$key]) && $request->miSelectRad[$key] !="") ? $request->miSelectRad[$key] : "0";
+          $p_radiologia .= ",";
+          $p_radiologia .= (isset($request->radio_portatil[$key]) && $request->radio_portatil[$key] !="") ? $request->radio_portatil[$key] : "0";
+          $p_radiologia .= "},";
+        }
+      endforeach;
+      if (strlen($p_radiologia) > 1) $p_radiologia = substr($p_radiologia, 0, -1);
+      $p_radiologia .= "}";
+      if($request->id_examen_rad[0]!=""):
+        $id_procedimiento_rad = $model_procedimiento->RegistrarProcedimientoImagenes($request->id_user, $id_prestacion, $request->id_establecimiento, $request->fecha_atencion, $p_radiologia, 3, 0, $request->id_farmacia);
+        /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////// Identificar radiología a la cual pertenece 
+        if($request->id_establecimiento == 76 ){
+          $updated = DB::table('rua_imagenologia')->where('id', $request->id_rua_imagenes)->update(['id_rad' => $id_procedimiento_rad, 'id_estado_reg' => 1]);
+        }
+        ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+      endif;
+    endif;
+    /***************************************************************************/
+    $date = Carbon::now();
+    $hora=$date->toTimeString(); 
+
+    if($hora>'01:30' & $hora<'07:31'):
+      /*echo*/ $turno='MD';
+    else:
+      if($hora>'07:30' & $hora<'13:31'):
+        /*echo*/ $turno='M';
+      else:
+        if($hora>'13:30' & $hora<'19:31'):
+          /*echo*/ $turno='T';
+        else:
+          if($hora>'19:30' & $hora<='23:59'):
+            /*echo*/ $turno='N';
+          else:
+            if($hora>='00:00' & $hora<='01:31'):
+              /*echo*/ $turno='N';
+            endif;
+          endif;
+        endif;
+      endif;
+    endif;
+    
+    /*$model_interconsulta = new \App\Models\Interconsulta;
+    if($request->personal_salud!=0 || $request->personal_salud!="" || $request->personal_salud!=null):
+       $id_servicio_interconsulta = $model_interconsulta->RegistrarInterconsulta($id_prestacion, $id_asegurado, $request->id_tipo_atencion, $request->fecha_atencion, $request->id_medico, $request->id_establecimiento, $request->inter_servicio, $request->personal_turno,$request->personal_salud,$request->motivo_interconsulta);
+    endif;
+    */
+    $model_interconsulta = new \App\Models\Interconsulta;
+      if (!empty($request->id_servicio_interconsulta)):
+        $p_interconsulta = "";
+        $p_interconsulta .= "{";
+        foreach ($request->id_servicio_interconsulta as $key => $value) :
+          
+          $personal_coordinacion = $request->interconsulta_personal_coodinacion[$key];
+          $personal_coordinacion = $personal_coordinacion != "" ? $personal_coordinacion : "NULL";
+
+          if ($request->id_servicio_interconsulta[$key] != "") {
+            $p_interconsulta .= "{";
+            $p_interconsulta .= $request->id_servicio_interconsulta[$key] . ",";
+            $p_interconsulta .= $turno . ",";
+            $p_interconsulta .= "0,";
+            $p_interconsulta .= str_replace($search, $replace, $request->motivo_interconsulta[$key]) . ",";
+            $p_interconsulta .= "0,0,";
+            $p_interconsulta .= $request->is_estable . ",";
+            $p_interconsulta .= $personal_coordinacion;
+            $p_interconsulta .= "},";
+          }
+        endforeach;
+        if (strlen($p_interconsulta) > 1) $p_interconsulta = substr($p_interconsulta, 0, -1);
+        $p_interconsulta .= "}"; 
+
+        if($request->id_servicio_interconsulta[0]!=""):
+          $id_interconsulta = $model_interconsulta->RegistrarInterconsulta($id_prestacion, $id_asegurado, $request->id_tipo_atencion, $request->fecha_atencion, $request->id_medico, $request->id_establecimiento, $p_interconsulta);
+          //$model_inter = new \App\Models\Interconsulta;
+          //$ok=$model_inter->ActualizaIdEvaluacion($id_interconsulta,$id_evaluacion);
+        endif;
+      endif;
+
+      $model_emergencia = new \App\Models\Emergencia;
+    $update=$model_emergencia->ActualizaEstadoEmergenciaAtencion($id_emergencia,3, $request->id_user, $fecha_hora_atencion);
+    if (!$update):
+      throw new \Exception("Error al intentar actualizar los datos de la Última atención del registro de emergencia.");
+    endif;
+    
+    //Alta automatica
+    if($request->id_prioridad==4):
+      $model_alta = Emergencia::where('id', '=', $id_emergencia)->first();
+      $model_alta->origen_alta = 4;
+      $model_alta->cpms_alta = "";
+      $model_alta->fecha_alta_medica = Carbon::now()->format('Y-m-d');
+      $model_alta->hora_alta_medica = Carbon::now()->format('H:i:m');
+      $model_alta->id_tipo_egres_med = 1;
+      $model_alta->flag_egreso = '1';
+      $model_alta->estado = '5';
+      $model_alta->id_medico_egreso = $request->id_user;
+      $p_diagnostico = ""; 
+      $id_1=0;
+      $id_2=0;
+      $id_3=0; 
+      if (isset($request->id_diagnostico)) :
+            foreach ($request->id_diagnostico as $key => $value) : 
+              if($key==0 && $request->id_diagnostico[$key] != ""){
+                $id_1=$request->id_diagnostico[$key] ; 
+              }
+              if($key==1 && $request->id_diagnostico[$key] != ""){
+                $id_2=$request->id_diagnostico[$key] ; 
+              }
+              if($key==2 && $request->id_diagnostico[$key] != ""){
+                $id_3=$request->id_diagnostico[$key] ; 
+              } 
+            endforeach;
+      endif;   
+      $model_alta->id_diag_cab = $id_1;
+      $model_alta->id_diag_cuer1 = $id_2;
+      $model_alta->id_diag_cuer2 = $id_3;    
+      $model_alta->id_condi_egres_med = 1;
+      $model_alta->id_servicio_destino = "0";
+      $model_alta->id_upss_alta ="0";
+      $model_alta->obs_traslado = "0";
+      $model_alta->detalle_alta_admin = "0";
+      $model_alta->id_establecimiento_traslado = "0";
+      $model_alta->necropsia = "0";
+      $model_alta->causas_muerte = "0";
+      $model_alta->condicion_traslado = "0";
+      $model_alta->personal_acompañante = "0";
+      $model_alta->especialida_destino = "0";
+      $model_alta->especialidad_destino_otro = "0";
+      if (!$model_alta->save()):
+        throw new \Exception("Error al intentar registrar los datos de Alta de una Atención de prioridad 4.");
+      endif;
+      $update_alta=$model_emergencia->InsertaEstancia($id_emergencia,$id_prestacion,0,2,'99234',$request->fecha_atencion,$request->id_user,1); 
+    endif;
+
+    // 
+    if ($request->flag_registro_alta):
+      $date = Carbon::now();
+      $fechaActual = $date->format('d-m-Y');
+      $horaActual = $date->format('H:i:s');
+
+      // 
+      $model_emergencia2 = Emergencia::where('id', '=', $request->id_emergencia)->first();
+
+      //SE PASO A ESTA PARTE PARA REUTILIZAR
+      $model_emergencia2_ = new Emergencia();
+      $valida_prestacion = $model_emergencia2_->getIdPrestacion($request->id_emergencia);
+      $model_intervencion_validar = new \App\Models\CqxIntervencion;
+      $existe_intervencion_cqx = $model_intervencion_validar::where('id_prestacion', $valida_prestacion->id)->exists();
+      //FIN SE PASO A ESTA PARTE PARA REUTILIZAR
+
+      //SI YA EXISTE LA INTERVENCION QUIRURGICA DE LA LA PRESTACION
+      if ($existe_intervencion_cqx) {
+        //SI SELECCIONO INTERVENCION QUIRURGICA
+        if ((string)$request->requiere_intervencion_quirurgica === '1') {
+          //RETORNARA EL MENSAJE QUE LA PRESTACION YA HA SIDO REGISTRADO
+          Session::flash('flash_message', 'No se pudo realizar el alta médica del paciente que requiere intervención quirúrgica, ya que la prestación correspondiente ya ha sido registrada en el módulo de Centro Quirúrgico.');
+          return redirect('/alta_medica/' . Auth::user()->id . '/' . $request->id_emergencia);
+        }
+      }
+
+      if ($model_emergencia2->id_referencia != 0) {
+        if ($request->id_tipo_egreso == 3) {
+          $datos_referencia = Referencia::find($model_emergencia2->id_referencia);
+
+          $model_actuliza_estado = new \App\Models\Actualizacion_estado;
+          $model_actuliza_estado->estado_antiguo = $datos_referencia->estado_proceso;
+          $model_actuliza_estado->estado_nuevo = 8;
+          $model_actuliza_estado->id_referencia = $datos_referencia->id;
+          $model_actuliza_estado->motivo_actualizacion = "Se guardo el alta en emergencia realizandoce la contrareferencia";
+          $model_actuliza_estado->created_us = Auth::user()->id;
+          $model_actuliza_estado->flag_estado_reg = 1;
+          if (!$model_actuliza_estado->save()):
+            throw new \Exception("Error al registrar un registro (Actualizacion_estado).");
+          endif;
+
+          $datos_referencia->estado_proceso = 8;
+          $datos_referencia->id_servicio_contrareferencia = $request->especialida_destino;
+          $datos_referencia->observacion_contrareferencia = $request->especialidad_destino_otro;
+          $datos_referencia->id_establecimiento_contrareferencia = $request->id_establecimiento_traslado;
+          $datos_referencia->id_medico_contrareferencia = $request->id_medico;
+          $datos_referencia->id_prestacion_contrareferencia = $request->id_emergencia;
+          $datos_referencia->fecha_atencion_cotrareferencia = $fechaActual;
+          if (!$datos_referencia->save()):
+            throw new \Exception("Error al actualizar el registro de Referencia.");
+          endif;
+
+        } else {
+          $datos_referencia = Referencia::find($model_emergencia2->id_referencia);
+
+          $model_actuliza_estado = new \App\Models\Actualizacion_estado;
+          $model_actuliza_estado->estado_antiguo = $datos_referencia->estado_proceso;
+          $model_actuliza_estado->estado_nuevo = 9;
+          $model_actuliza_estado->id_referencia = $datos_referencia->id;
+          $model_actuliza_estado->motivo_actualizacion = "Se guardo el alta en emergencia pero no se selecciono traslado para la contrareferencia";
+          $model_actuliza_estado->created_us = Auth::user()->id;
+          $model_actuliza_estado->flag_estado_reg = 1;
+          if (!$model_actuliza_estado->save()):
+            throw new \Exception("Error al registrar un registro (Actualizacion_estado).");
+          endif;
+
+          $datos_referencia->estado_proceso = 9;
+          $datos_referencia->id_servicio_contrareferencia = 9;
+          $datos_referencia->observacion_contrareferencia = "";
+          $datos_referencia->id_medico_contrareferencia = $request->id_medico;
+          $datos_referencia->id_prestacion_contrareferencia = $request->id_emergencia;
+          $datos_referencia->fecha_atencion_cotrareferencia = $fechaActual;
+          if (!$datos_referencia->save()):
+            throw new \Exception("Error al actualizar el registro de Referencia.");
+          endif;
+        }
+      }
+      $fecha_cierre = $request->fecha_egreso;
+      $hora_cierre = $request->hora_egreso;
+      $fecha_cierre = date('Y-m-d', strtotime($fecha_cierre));
+      $date = $fecha_cierre;
+      $fechaActual = $fecha_cierre;
+      $horaActual = $hora_cierre;
+      $id_user =  Auth::user()->id;
+      $model_emergencia = Emergencia::where('id', '=', $request->id_emergencia)->first();
+      $emergencia_prestacion = Prestaciones::where('id_ext', '=', $request->id_emergencia)->where('id_tipo_atencion', 2)->first();
+
+      /*$existeevolucion = "SELECT count(e.id)  from emergencias e
+                          inner join evaluaciones e2 on e2.id_emergencia = e.id
+                          where e.id = '$request->id_emergencia' and e2.id_estado_reg <> 0";
+      $existeevolucion = DB::select($existeevolucion);
+      $existeevolucion = $existeevolucion[0]->count;
+
+      if ($existeevolucion == 0) {*/
+        $fecha_hora_ingreso = $model_emergencia->fecha_atencion;
+        $id_evaluacion = 0;
+      /*} else {
+        $datoevalucion = "SELECT e2.* from emergencias e
+                          inner join evaluaciones e2 on e2.id_emergencia = e.id
+                          where e.id = '$request->id_emergencia' and e2.id_tipo_atencion = 2 and e2.id_estado_reg <> 0 order by e2.created_at desc";
+        $datoevalucion = DB::select($datoevalucion);
+        $fecha_hora_ingreso = $datoevalucion[0]->fecha_atencion;
+        $id_evaluacion = $datoevalucion[0]->id;
+      }*/
+
+      $unido = ($fecha_cierre . " " . $hora_cierre);
+      $resulta = ((strtotime($unido)) - (strtotime($fecha_hora_ingreso))) / 86400;
+
+      if ($resulta < 0) {
+        Session::flash('flash_message', 'NO SE REGISTRO EL ALTA - LA FECHA DE ALTA INGRESADA ' . $unido . ' ES MENOR A LA FECHA DE LA ULTIMA ATENCION ' . $fecha_hora_ingreso . ' - FORMATO DE FECHA 24 HORAS, MODIFIQUE LA FECHA DE ALTA');
+        return redirect('/alta_medica/' . $id_user . '/' . $request->id_emergencia);
+      }
+
+      $dato_triaje_cpms = "SELECT * from triajes where id = '$model_emergencia->id_triaje'";
+      $dato_triaje_cpms = DB::select($dato_triaje_cpms);
+
+      $resulta_hora = ((strtotime($unido)) - (strtotime($fecha_hora_ingreso))) / 43200;
+      //dd($resulta_hora);
+      $estable_nivel =  DB::table('establecimientos')
+        ->select('establecimientos.*')
+        ->where('id', $model_emergencia->id_establecimiento)
+        ->first();
+
+      if ($estable_nivel == '3') {
+        if ($model_emergencia->id_triaje == "1" || $model_emergencia->id_triaje == "12") {
+          if ($resulta_hora < 1) {
+            $codigo_cpms = "99234";
+          } else {
+            $codigo_cpms = "99295";
+          }
+        } else if ($model_emergencia->id_triaje == "20") {
+          $codigo_cpms = "";
+        } else {
+          if ($resulta_hora < 1) {
+            $codigo_cpms = "99234";
+          } else {
+            $codigo_cpms = "99231.15";
+          }
+        }
+      } else {
+        if ($model_emergencia->id_prioridad == '1') {
+          $codigo_cpms = "99285";
+        } else if ($model_emergencia->id_prioridad == '2') {
+          $codigo_cpms = "99284";
+        } else if ($model_emergencia->id_prioridad == '3') {
+          $codigo_cpms = "99282";
+        } else {
+          $codigo_cpms = "99281";
+        }
+      }
+
+      $emergencia_model = new \App\Models\Emergencia;
+
+      /**********Calcula estancia*************/
+      $inicio = ($model_emergencia->fecha_registro_ingreso);
+      $final = ($date);
+      $inicios = strtotime($model_emergencia->fecha_registro_ingreso);
+      $fecha_alta = explode(" ", $date);
+      $hora_alta = explode(" ", $horaActual);
+      $fecha_finals = $fecha_alta[0] . ' ' . $hora_alta[0];
+      $finals = strtotime($fecha_finals);
+      $resulta = ($finals - $inicios) / 86400;
+      $resulta = round($resulta);
+
+      if ($resulta == "0") {
+        $dia_estancia = '1';
+      } else {
+        $dia_estancia = $resulta;
+      }
+
+      $update_alta = $emergencia_model->InsertaEstancia($request->id_emergencia, $emergencia_prestacion->id, $id_evaluacion, 2, $codigo_cpms, $model_emergencia->fecha_atencion, $id_user, $dia_estancia);
+
+      $model_emergencia->origen_alta = 2;
+      $model_emergencia->cpms_alta = $codigo_cpms;
+      $model_emergencia->fecha_alta_medica = $date;
+      $model_emergencia->hora_alta_medica = $horaActual;
+      $model_emergencia->id_tipo_egres_med = $request->id_tipo_egreso;
+      $model_emergencia->flag_egreso = '1';
+      $model_emergencia->estado = '5';
+      $model_emergencia->id_medico_egreso = $id_user;
+      $p_diagnostico = "";
+      $id_1 = 0;
+      $id_2 = 0;
+      $id_3 = 0;
+
+      if (isset($request->id_diagnostico_egreso)):
+        foreach ($request->id_diagnostico_egreso as $key => $value):
+          if ($key == 0 && $request->id_diagnostico_egreso[$key] != "") {
+            $id_1 = $request->id_diagnostico_egreso[$key];
+          }
+          if ($key == 1 && $request->id_diagnostico_egreso[$key] != "") {
+            $id_2 = $request->id_diagnostico_egreso[$key];
+          }
+          if ($key == 2 && $request->id_diagnostico_egreso[$key] != "") {
+            $id_3 = $request->id_diagnostico_egreso[$key];
+          }
+        endforeach;
+      endif;
+
+        $p_producto_alta = "";
+      $p_producto_alta .= "{";
+      if (isset($request->id_producto_alta)) :
+        if ($request->id_producto_alta[0] != "ru='undefined'") :
+          foreach ($request->id_producto_alta as $key => $value) :
+            if ($request->id_producto_alta[$key] != "") {
+              $p_producto_alta .= "{";
+              $p_producto_alta .= $request->id_producto_alta[$key] . ",";
+              $p_producto_alta .= $request->tiempo_periodo_alta[$key] . ",";
+              $p_producto_alta .= $request->nro_med_solictados_alta[$key] . ",";
+              $p_producto_alta .= (isset($request->nro_med_entregados_alta[$key]) && $request->nro_med_entregados_alta[$key] != "") ? $request->nro_med_entregados_alta[$key] : 0;
+              $p_producto_alta .= ",";
+              $p_producto_alta .= (isset($request->nro_stocks_almacen_alta[$key]) && $request->nro_stocks_almacen_alta[$key] != "") ? $request->nro_stocks_almacen_alta[$key] : 0;
+              $p_producto_alta .= ",";
+              $p_producto_alta .= (isset($request->nro_stocks_establecimiento_alta[$key]) && $request->nro_stocks_establecimiento_alta[$key] != "") ? $request->nro_stocks_establecimiento_alta[$key] : 0;
+              $p_producto_alta .= ",";
+              $p_producto_alta .= (isset($request->nro_stocks_alta[$key]) && $request->nro_stocks_alta[$key] != "") ? $request->nro_stocks_alta[$key] : 0;
+              $p_producto_alta .= ",";
+              $p_producto_alta .= (isset($request->posologia_alta[$key]) && $request->posologia_alta[$key] != "") ? str_replace(",", "###", $request->posologia_alta[$key]) : "-";
+              $p_producto_alta .= ",";
+              $p_producto_alta .= (isset($request->miSelectProd_alta[$key]) && $request->miSelectProd_alta[$key] != "") ? $request->miSelectProd_alta[$key] : 0;
+              $p_producto_alta .= ",";
+              $p_producto_alta .= $request->id_via_administracion_alta[$key];
+              $p_producto_alta .= "},";
+            }
+          endforeach;
+          if (strlen($p_producto_alta) > 1) $p_producto_alta = substr($p_producto_alta, 0, -1);
+        endif;
+      endif;
+      $p_producto_alta .= "}";
+
+      $p_diagnostico_alta = "";
+      $p_diagnostico_alta .= "{";
+      if (isset($request->id_diagnostico_egreso)) :
+        foreach ($request->id_diagnostico_egreso as $key => $value) :
+          if ($request->id_diagnostico_egreso[$key] != "") {
+            $p_diagnostico_alta .= "{";
+            $p_diagnostico_alta .= $request->id_diagnostico_egreso[$key] . ",";
+            $p_diagnostico_alta .= "0";
+            $p_diagnostico_alta .= "},";
+          }
+        endforeach;
+        if (strlen($p_diagnostico_alta) > 1) $p_diagnostico_alta = substr($p_diagnostico_alta, 0, -1);
+      endif;
+      $p_diagnostico_alta .= "}";
+
+      $medico = DB::table('medicos')->select('medicos.*')->where('dni', $dni)->first();
+
+      $asegurado = Asegurado::find($emergencia_prestacion->id_asegurado);
+      $cita = Cita::find($emergencia_prestacion->id_cita);
+      $titular = Asegurado::find($asegurado->id_asegurado_titular);
+      $historia = Asegurado_historia::where('id_asegurado',$cita->id_asegurado)->where('id_establecimiento',$cita->id_establecimiento)->first();
+
+      $tipo_beneficiario = $cita->parentesco;
+      $grado_ase = $cita->grado;
+      $codigo_upss_req = $emergencia_prestacion->codigo_upss;
+      $id_medico_receta = $medico->id;
+      $nro_historia = isset($historia->nro_historia) ? $historia->nro_historia : "";
+
+      $receta_flag_origen = 1;
+      if (isset($request->id_producto_alta)) :
+        if ($request->id_producto_alta[0] != "ru='undefined'") :
+            $id_receta_vale = $model_receta->postRegistrarRecetaValeAltas(
+              $id_receta_vale,
+              $request->id_farmacia_receta,
+              $request->id_user,
+              $id_consultorio,
+              $nro_receta,
+              $digitos_adicionales,
+              $asegurado->nro_doc_ident,        
+              $asegurado->cip,                  
+              $asegurado->tipo_doc_ident,       
+              $asegurado->nombre,                
+              $asegurado->paterno,               
+              $asegurado->materno,                
+              $tipo_beneficiario,                 
+              $titular->nro_doc_ident,           
+              $titular->tipo_doc_ident,          
+              $titular->nombre,                  
+              $titular->paterno,                 
+              $titular->materno,                  
+              $request->fecha_expedicion,
+              $fechaActual,
+              $nro_historia,                   
+              $grado_ase,                         
+              $id_medico_receta,
+              $id_anestesiologo,
+              $id_tiporeceta,
+              $turno,
+              $obs_registro,
+              $id_receta_vale_bus,
+              $id_admision,
+              $tipo_via,
+              $sub_via,
+              $final_via,
+              $nro_guia,
+              $interconsulta,
+              $interconsulta_dias,
+              $emergencia_prestacion->id,          
+              $id_tipo_num,
+              $estado_receta,
+              $p_producto_alta,
+              $p_diagnostico_alta,
+              $asegurado->sexo,                  
+              $asegurado->fecha_nac,               
+              $codigo_upss_req,
+              $receta_flag_origen                 
+            );
+    
+            if (intval($id_receta_vale) <= 0) {
+                throw new \Exception("Error al intentar registrar la Receta en el Alta Médica.");
+            }
+        endif;
+      endif;
+
+      $model_emergencia->id_diag_cab = $id_1;
+      $model_emergencia->id_diag_cuer1 = $id_2;
+      $model_emergencia->id_diag_cuer2 = $id_3;
+      if ($request->id_tipo_egreso == '1') { //alta
+        $model_emergencia->id_condi_egres_med = $request->id_condicion_alta;
+        $model_emergencia->id_servicio_destino = "0";
+        $model_emergencia->id_upss_alta = "0";
+        $model_emergencia->obs_traslado = "0";
+        $model_emergencia->detalle_alta_admin = "0";
+        $model_emergencia->id_establecimiento_traslado = "0";
+        $model_emergencia->necropsia = "0";
+        $model_emergencia->causas_muerte = "0";
+        $model_emergencia->condicion_traslado = "0";
+        $model_emergencia->personal_acompañante = "0";
+        $model_emergencia->especialida_destino = "0";
+        $model_emergencia->especialidad_destino_otro = "0";
+      } else if ($request->id_tipo_egreso == '2') { //hospitalizado
+        $upss = "SELECT 
+                concat(u.descripcion_upss,' / ',u.codigo ) as nombre,
+                u.id as id_upss,
+                u.codigo as codigo_upss,
+                c.id as id_consultorio,
+                c.nombre as nombre_consultorio
+                from consultorios c 
+                inner join upsses u on u.id_consultorio = c.id 
+                where u.id_tipo_atencion = '3' and u.estado = '1' and u.id='$request->id_servicio_hospitalizacion'";
+        $upss = DB::select($upss);
+        $upss = $upss[0];
+
+        $model_emergencia->id_condi_egres_med = "3";
+        $model_emergencia->id_servicio_destino = $upss->id_consultorio; //servicio encargado
+        $model_emergencia->id_upss_alta = $upss->id_upss; //upss encargado
+        $model_emergencia->obs_traslado = "0";
+        $model_emergencia->detalle_alta_admin = "0";
+        $model_emergencia->obs_traslado = "0";
+        $model_emergencia->necropsia = "0";
+        $model_emergencia->causas_muerte = "0";
+        $model_emergencia->condicion_traslado = "0";
+        $model_emergencia->personal_acompañante = "0";
+        $model_emergencia->especialida_destino = "0";
+        $model_emergencia->especialidad_destino_otro = "0";
+
+        $obtenerdato = $emergencia_model->GetObtenerServicioActual($id_emergencia);
+
+        // $model_emergencia->id_upss_origen = $obtenerdato->id_ups;
+        // $model_emergencia->id_servicio_origen = $obtenerdato->id_servicio;
+        // $model_emergencia->id_servicio_destino_ho = $request->id_servicio_destino;
+        // $model_emergencia->id_pabellon_destino = $request->id_pabellon_destino;
+        // $model_emergencia->id_cuarto_destino = $request->id_cama;
+
+        // $model_emergencia->pabellon_ubicacion = $request->id_pabellon_ubicacion;
+        // $model_emergencia->id_upss_ubicacion = $request->id_upss_ubicacion;
+        $model_emergencia->id_edificio_ubicacion = $request->id_edificio_ubicacion;
+        $model_emergencia->id_pabellon_ubicacion = $request->id_pabellon_ubicacion;
+        // $model_emergencia->id_servicio_ubicacion = $request->id_servicio_ubicacion;
+        // $model_emergencia->id_cama_ubicacion = $request->id_cama_ubicacion;
+        // switch ($request->id_clase_cama_ubicacion) {
+        //   case 1:
+        //   case 6:
+        //   case 7:
+        //     $model_emergencia->personal_coordinacion = $request->personal_coordinacion;
+        //     break;
+        // }
+
+      } else if ($request->id_tipo_egreso == '3') { //traslado
+        $model_emergencia->id_servicio_destino = "0";
+        $model_emergencia->id_upss_alta = "0";
+        $model_emergencia->detalle_alta_admin = "0";
+        $model_emergencia->id_condi_egres_med = "3";
+        $model_emergencia->obs_traslado = $request->obs_traslado;
+        $model_emergencia->id_establecimiento_traslado = $request->id_establecimiento_traslado;
+        $model_emergencia->necropsia = "0";
+        $model_emergencia->condicion_traslado = $request->condicion_traslado;
+        $model_emergencia->personal_acompañante = $request->personal_acompañante;
+        $model_emergencia->especialida_destino = $request->especialida_destino;
+        $model_emergencia->especialidad_destino_otro = $request->especialidad_destino_otro;
+        $model_emergencia->causas_muerte = "0";
+      } else if ($request->id_tipo_egreso == '4') { //fallecido
+        $model_emergencia->id_servicio_destino = "0";
+        $model_emergencia->id_upss_alta = "0";
+        $model_emergencia->obs_traslado = "0";
+        $model_emergencia->obs_traslado = "0";
+        $model_emergencia->detalle_alta_admin = "0";
+        $model_emergencia->id_condi_egres_med = "6";
+        $model_emergencia->necropsia = $request->necropsia;
+        $model_emergencia->causas_muerte = $request->causas_muerte;
+        //$model_emergencia->fecha_defuncion = $request->fecha_defuncion;
+        //$model_emergencia->hora_defuncion = $request->hora_defuncion;
+        $model_emergencia->condicion_traslado = "0";
+        $model_emergencia->personal_acompañante = "0";
+        $model_emergencia->especialida_destino = "0";
+        $model_emergencia->especialidad_destino_otro = "0";
+      } else if ($request->id_tipo_egreso == '7') { //retiro voluntario
+        $model_emergencia->id_servicio_destino = "0";
+        $model_emergencia->id_upss_alta = "0";
+        $model_emergencia->obs_traslado = "0";
+        $model_emergencia->obs_traslado = "0";
+        $model_emergencia->id_condi_egres_med = "4";
+        $model_emergencia->necropsia = "0";
+        $model_emergencia->detalle_alta_admin = $request->obs_retiro;
+        $model_emergencia->causas_muerte = "0";
+        $model_emergencia->condicion_traslado = "0";
+        $model_emergencia->personal_acompañante = "0";
+        $model_emergencia->especialida_destino = "0";
+        $model_emergencia->especialidad_destino_otro = "0";
+      } else if ($request->id_tipo_egreso == '6') { //fuga
+        $model_emergencia->id_servicio_destino = "0";
+        $model_emergencia->id_upss_alta = "0";
+        $model_emergencia->obs_traslado = "0";
+        $model_emergencia->obs_traslado = "0";
+        $model_emergencia->id_condi_egres_med = "5";
+        $model_emergencia->necropsia = "0";
+        $model_emergencia->detalle_alta_admin = $request->obs_fuga;
+        $model_emergencia->causas_muerte = "0";
+        $model_emergencia->condicion_traslado = "0";
+        $model_emergencia->personal_acompañante = "0";
+        $model_emergencia->especialida_destino = "0";
+        $model_emergencia->especialidad_destino_otro = "0";
+      } else {
+        $model_emergencia->id_servicio_destino = "0";
+        $model_emergencia->id_upss_alta = "0";
+        $model_emergencia->obs_traslado = "0";
+        $model_emergencia->obs_traslado = "0";
+        $model_emergencia->necropsia = "0";
+        $model_emergencia->detalle_alta_admin = "0";
+        $model_emergencia->causas_muerte = "0";
+        $model_emergencia->id_condi_egres_med = "0";
+        $model_emergencia->id_condi_egres_med = "1";
+        $model_emergencia->condicion_traslado = "0";
+        $model_emergencia->personal_acompañante = "0";
+        $model_emergencia->especialida_destino = "0";
+        $model_emergencia->especialidad_destino_otro = "0";
+      }
+
+      if ($model_emergencia->id_tipo_beneficiario == '12') {
+        $model_emergencia->numero_boleta = $request->numeroboleta;
+        $model_emergencia->numero_documento_coronel_guardia  = $request->numeroguar;
+      } else {
+        $model_emergencia->numero_boleta = "0";
+        $model_emergencia->numero_documento_coronel_guardia  = "0";
+      }
+
+      if (isset($model_emergencia->cama_estado)) {
+        $model_cama = \App\Models\Cama::where('id', '=', $model_emergencia->cama_estado)->first();
+        $model_cama->estado = 0; // 1 - No disponible (Estos datos son los que van a ir a produccion)
+        $model_cama->situacion = '1'; // '5' - En Desinfeccion (Estos datos son los que van a ir a produccion)
+        if (!$model_cama->save()):
+          throw new \Exception("Error al desocupar la cama.");
+        endif;
+      }
+
+      if (!$model_emergencia->save()):
+        throw new \Exception("Error al actualizar los datos del Alta.");
+      endif;
+
+      //PARA NO SE PUEDA GENERAR DUPLICACACION
+      if (!$existe_intervencion_cqx) { //PARA NO SE PUEDA GENERAR DUPLICACACION
+        if ($request->id_tipo_egreso == '2') {
+          $flag_quirurgico = 0;
+          if (isset($request->requiere_intervencion_quirurgica) && intval($request->requiere_intervencion_quirurgica) == 1) {
+            $flag_quirurgico = $request->requiere_intervencion_quirurgica;
+
+            $model_hospitalizacion_orden = new \App\Models\HospitalizacionOrden();
+            $response = $model_hospitalizacion_orden->RegistrarOrdenDeHospitalizacionDesdeEmergencia($request->id_emergencia, $flag_quirurgico);
+
+            $hora_inicio_intervencion = !empty($request->hora_inicio_intervencion) ? $request->hora_inicio_intervencion : null;
+            $hora_fin_intervencion = !empty($request->hora_fin_intervencion) ? $request->hora_fin_intervencion : null;
+
+            // En caso de Id Upps sea de Centro Quirugico Registrar Intervencion Quirurgica
+            // switch ($request->id_servicio_hospitalizacion) {
+            //   case 213: case 214: case 216: case 215:
+            //   case 217: case 218: case 219:
+                $duracion_cirugia = $request->duracion_cirugia ? floatval($request->duracion_cirugia) : null;
+                $modelintervencion = new \App\Models\CqxIntervencion;
+                $cqx_id_intervencion = $modelintervencion->RegistrarIntervencionQxDesdeEmergencia($request->id_emergencia, Auth::user()->id, $request->id_tipo_cirugia, $duracion_cirugia, $fecha_cierre, $hora_inicio_intervencion, $hora_fin_intervencion);
+                //break;
+            //}
+
+            //Registro de diagnosticos cqx
+            if (isset($request->id_diagnostico_quirurgico)):
+              $dignostico_cqx = new Receta_diagnostico();
+              foreach ($request->id_diagnostico_quirurgico as $key => $value):
+                if ($request->id_diagnostico_quirurgico[$key] != "") {
+                  $dignostico_cqx->id_diagnostico = $request->id_diagnostico_quirurgico[$key];
+                  $dignostico_cqx->id_tipo_diagnostico = $request->id_tipo_diagnostico_quirurgico[$key];
+                  $dignostico_cqx->estado = 1;
+                  $dignostico_cqx->id_prestacion = $id_prestacion;
+                  $dignostico_cqx->created_at = Carbon::now();
+                  $dignostico_cqx->created_us = $request->id_user;
+                  $dignostico_cqx->id_intervencion = $cqx_id_intervencion;
+                  $dignostico_cqx->save();
+                }
+              endforeach;
+            endif;
+
+            // Registro de Medicos Cirujanos
+            if (isset($request->id_medico_cirujano)):
+              $model_cq_profesional = new \App\Models\CqxProfesional();
+              foreach ($request->id_medico_cirujano as $key => $value):
+                if ($request->id_medico_cirujano[$key] != "") {
+                  $p_id_medico = $request->id_medico_cirujano[$key];
+                  $p_id_medico_cargo = (isset($request->id_medico_cirujano_cargo[$key]) && $request->id_medico_cirujano_cargo[$key] > 0 ? $request->id_medico_cirujano_cargo[$key] : 0);
+                  $flag_personal = 0; // Cirujanos
+                  $response = $model_cq_profesional->RegistrarProfesionalesPreQx($cqx_id_intervencion, $p_id_medico, $p_id_medico_cargo, $request->id_user, $flag_personal, 0);
+                }
+              endforeach;
+            endif;
+
+            // Registro de Procedimientos de Intervencion quirurgica
+            if (isset($request->id_procedimiento_intervencion)) :
+              $model_cq_procedimiento = new \App\Models\CqxProcedimiento();
+              foreach ($request->id_procedimiento_intervencion as $key => $value) :
+                if ($request->id_procedimiento_intervencion[$key] != "") {
+                  $p_id_procedimiento = $request->id_procedimiento_intervencion[$key];
+                  $model_cq_procedimiento->RegistrarProcedimientoPreQx($cqx_id_intervencion, $p_id_procedimiento, Auth::user()->id, 0, 1, false);
+                }
+              endforeach;
+            endif;
+          }
+        }
+      }
+
+      $model_trama = new \App\Models\Emergencia;
+      // $model_evaluacion = new \App\Models\Evaluacione;
+      $enviado_dato = $model_trama->enviartrama($request->id_emergencia);
+
+      // Session::flash('flash_message', 'Alta Medica exitosa');
+    endif;
+    // 
+    
+    /*if ($id_prestacion == 0) {
+      Session::flash('flash_message', 'No se pudo registrar la Prestacion, hubo un problema con la conexión de internet de su establecimiento PNP, vuelva a intentarlo nuevamente');
+      return redirect('/listar_citas_medico_paciente');
+    } else {
+          $datos=true;
+        }*/
+
+      DB::commit();
+      $registro_validado = true;
+
+    } catch (\Exception $e) {
+      DB::rollback();
+      $mensaje_error = $e->getMessage();
+      Log::error("Registro Atencion Emergencia => id_emergencia: " . $request->id_emergencia . 
+          "\n\nmensaje: " . $e->getMessage() . 
+          "\n\ndatos del request: " . json_encode($request->all()) . 
+          "\n\nstack trace: " . $e->getTraceAsString()
+      );
+      // throw $e;
+    } catch (\Throwable $th) {
+      DB::rollback();
+      $mensaje_error = $th->getMessage();
+      Log::critical("Registro Atencion Emergencia => id_emergencia: " . $request->id_emergencia . 
+          "\n\nmensaje: " . $th->getMessage() . 
+          "\n\ndatos del request: " . json_encode($request->all()) . 
+          "\n\nstack trace: " . $th->getTraceAsString()
+      );
+      // throw $th;
+    }
+    /*if($datos && $id_prestacion>0){
+      Session::flash('flash_message', 'Prestación exitosa');
+      return redirect('/ver_prestacion_emergencias/' . $request->id_user . '/' . $id_prestacion);
+    }*/
+
+    if ($registro_validado):
+      Session::flash('flash_message', 'Registro de Atención de Emergencia exitosa');
+      return redirect('/ver_prestacion_emergencias/' . $request->id_user . '/' . $id_prestacion);
+    else:
+      Session::flash('flash_warning', '<strong>Error:</strong> No se pudo registrar la Atención Médica de Emergencia, vuelva a intentarlo nuevamente.<br><br>' . $mensaje_error);
+      return redirect('/all_admisiones_atendidas_by_emergencia');
+    endif;
+  }
+
+  public function modal_alerta_atenciones($dni_beneficiario){ 
+    $model_emergencia = new \App\Models\Emergencia;
+    $lista_alertas = $model_emergencia->obtener_alerta_atenciones($dni_beneficiario); 
+
+    $alta_pendiente=$model_emergencia->evaluar_pendientes_alta($dni_beneficiario); 
+
+    $lista_de_alertas["lista_de_alertas"] = $lista_alertas;
+    $lista_de_alertas["alta_pendiente"] = $alta_pendiente; 
+    return json_encode($lista_de_alertas);
+  }
+
+  public function validar_pendientes_alta($dni_beneficiario){ 
+    $model_emergencia = new \App\Models\Emergencia;
+    $alta_pendiente=$model_emergencia->evaluar_pendientes_alta($dni_beneficiario); 
+    return json_encode($alta_pendiente);
+  }
+  public function buscar_ticket_by_id($id_ticket){ 
+    $model_ticket = new \App\Models\Ticket;
+    $ticket_pendiente=$model_ticket->buscar_ticket_by_id($id_ticket); 
+    if($ticket_pendiente[0]!=null){
+      if($ticket_pendiente[0]->id_asegurado!=0){
+        if($ticket_pendiente[0]->dni_reniec==''){ 
+          $existe_beneficiario = \App\Models\Asegurado::where('id', '=', $ticket_pendiente[0]->id_asegurado)->where('id_estado_reg', '=', 1)->first();
+          if($existe_beneficiario){
+            
+            $ticket_update = \App\Models\Ticket::find($id_ticket); 
+            $ticket_update->dni_reniec =$existe_beneficiario->nro_doc_ident ;
+            $ticket_update->nombres_reniec =$existe_beneficiario->nombre .' '.$existe_beneficiario->paterno.' '.$existe_beneficiario->materno; 
+            $ticket_update->save();
+            
+            $ticket_pendiente=$model_ticket->buscar_ticket_by_id($id_ticket); 
+          } 
+        }
+      }
+    }
+
+    return json_encode($ticket_pendiente);
+  }
+
+  public function obtener_codigo_triaje($id_triaje){ 
+    $cad = "select codigo from triajes f where id = '".$id_triaje."'";//  limit 3
+    $data = DB::select($cad);  
+    return $data; 
+  }
+  public function listar_prestacion_ajax_emergencia(Request $request)
+  {
+
+    $model_emergencias = new Emergencia();
+    $p[] = $request->fecha_ini.' '.$request->hora_ini;
+    $p[] = $request->fecha_fin.' '.$request->hora_fin;
+    $p[] = $request->dni_beneficiario;
+    $p[] = $request->nombre_beneficiario;
+    $p[] = (isset($request->id_prioridad) && $request->id_prioridad != "") ? $request->id_prioridad : 0;
+    $p[] = (isset($request->id_topico) && $request->id_topico != "") ? $request->id_topico : 0;
+    
+    $p[] = $request->id_medico;
+    $p[] = $request->estado;
+    $p[] = Auth::user()->id_establecimiento;
+    $p[] = $request->id_prestacion_buscar;
+    $p[] = $request->NumeroPagina;
+    $p[] = $request->NumeroRegistros;
+    $data = $model_emergencias->listar_prestacion_ajax_emergencia($p);
+    $iTotalDisplayRecords = isset($data[0]->totalrows) ? $data[0]->totalrows : 0;
+    //print_r($afiliacion);exit();
+    $result["PageStart"] = $request->NumeroPagina;
+    $result["pageSize"] = $request->NumeroRegistros;
+    $result["SearchText"] = "";
+    $result["ShowChildren"] = true;
+    $result["iTotalRecords"] = $iTotalDisplayRecords;
+    $result["iTotalDisplayRecords"] = $iTotalDisplayRecords;
+    $result["aaData"] = $data;
+    echo json_encode($result);
+  }
+  
+  public function anular_emergencia_admision(Request $request) {
+    if (!Auth::check()):
+      return redirect('/auth/login');
+    endif;
+    
+    $triaje = Emergencia::where('id', $request->id)->first();
+    $triaje->estado = 0;
+    $triaje->motivo_anulacion_admision = $request->motivo_anulacion;
+    $triaje->id_usuario_anulacion_admision = Auth::user()->id; 
+    $triaje->fecha_anulacion_admision = Carbon::now();
+    $triaje->save();
+
+    $array["sw"] = true;
+    echo json_encode($array);
+  }
+  
+  public function anular_emergencia_triaje(Request $request) {
+    if (!Auth::check()):
+      return redirect('/auth/login');
+    endif;
+    
+    $triaje = Emergencia::where('id', $request->id)->first();
+    $triaje->estado = 0;
+    $triaje->motivo_anulacion = $request->motivo_anulacion;
+    $triaje->id_usuario_anulacion = Auth::user()->id; 
+    $triaje->fecha_anulacion = Carbon::now();
+    $triaje->save();
+
+    $array["sw"] = true;
+    echo json_encode($array);
+  }
+  public function anular_emergencia_ticket(Request $request) {
+    if (!Auth::check()):
+      return redirect('/auth/login');
+    endif;
+    
+    $ticket=\App\Models\Ticket::where('id', '=', $request->id_ticket)->first();  
+    $ticket->estado = 0;
+    $ticket->id_estado_tv = 0;
+    $ticket->estado_llamada = 0; 
+    $ticket->motivo_anulacion = $request->motivo_anulacion; 
+    
+    $ticket->seleccionado_at = null;
+    $ticket->seleccionado_us = null;
+    $ticket->anulado_at = Carbon::now();
+    $ticket->anulado_us = Auth::user()->id;
+    $ticket->save();
+ 
+    $admision = Emergencia::where('id', $ticket->id_emergencia_a)->first();
+    if($admision){
+      $admision->estado = 0;
+      $admision->motivo_anulacion_admision = $request->motivo_anulacion;
+      $admision->id_usuario_anulacion_admision = Auth::user()->id; 
+      $admision->fecha_anulacion_admision = Carbon::now();
+      $admision->save();
+    }
+
+    $array["sw"] = true;
+    echo json_encode($array);
+  }
+  
+  public function listado_tickets_llamado(){ 
+    $model_emergencia = new \App\Models\Emergencia;  
+    return $model_emergencia->listado_tickets_llamado();
+  }
+
+  public function llamada_triaje_amergencia($id_ticket, $id_estado_tv, $estado_llamada, $cantidad_llamada)
+  {
+    if (!Auth::check()) :
+      return redirect('/auth/login');
+    endif;
+
+    $ticket = \App\Models\Ticket::where('id', '=', $id_ticket)->first();
+    $date = Carbon::now();
+    if ($id_estado_tv == 4) { //SELECCIONADO
+
+      $ticket->ventanilla = Auth::user()->id_ventanilla;
+      $ticket->seleccionado_at = $date;
+      $ticket->seleccionado_us = Auth::user()->id;
+      $ticket->llamado_at = null;
+      $ticket->llamado_us = null;
+      $ticket->anulado_at = null;
+      $ticket->anulado_us = null;
+      $ticket->atendido_at = null;
+      $ticket->atendido_us = null;
+    } else if ($id_estado_tv == 2) { //CANCELADO  - POSPUESTO
+
+      $ticket->anulado_at = Carbon::now();
+      $ticket->anulado_us = Auth::user()->id;
+      $ticket->llamado_at = null;
+      $ticket->llamado_us = null;
+      $ticket->seleccionado_at = null;
+      $ticket->seleccionado_us = null;
+      $ticket->atendido_at = null;
+      $ticket->atendido_us = null;
+      $ticket->ventanilla = null;
+    } else if ($id_estado_tv == 3) { //ATENDIDO 
+
+      $ticket->atendido_at = Carbon::now();
+      $ticket->atendido_us = Auth::user()->id;
+      $ticket->llamado_at = null;
+      $ticket->llamado_us = null;
+      $ticket->anulado_at = null;
+      $ticket->anulado_us = null;
+      $ticket->seleccionado_at = null;
+      $ticket->seleccionado_us = null;
+    } else if ($id_estado_tv == 1) { //LLAMADO
+
+      $ticket->llamado_at  = Carbon::now();
+      $ticket->llamado_us  = Auth::user()->id;
+      $ticket->atendido_at = null;
+      $ticket->atendido_us = null;
+      $ticket->anulado_at = null;
+      $ticket->anulado_us = null;
+      $ticket->seleccionado_at = null;
+      $ticket->seleccionado_us = null;
+      $ticket->cantidad_llamada = ($ticket->cantidad_llamada + 1);
+
+      //REGISTRA HISTORIAL LLAMADO
+      $ticketH = new \App\Models\Ticket;
+      $ticketH->registrar_HistorialLlamado($id_ticket, Auth::user()->id);
+    }
+
+    $ticket->id_estado_tv = $id_estado_tv;
+    $ticket->estado_llamada = $estado_llamada;
+    $ticket->save();
+
+    $array["sw"] = true;
+    echo json_encode($array);
+  }
+
+  public function listar_atencion_emergencia_ajax(Request $request)
+  {
+   
+    $model_emergencias = new Emergencia();
+    $p[] = Auth::user()->id_establecimiento;
+    $p[] = $request->fecha_ini;
+    $p[] = $request->fecha_fin;
+    $p[] = $request->dni_beneficiario;
+    $p[] = strtoupper($request->nombre_beneficiario);
+    $p[] = $request->estado;
+    $p[] = $request->id_prioridad;
+    $p[] = $request->id_topico;
+    $p[] = $request->NumeroPagina;
+    $p[] = $request->NumeroRegistros;
+    $p[] = $request->opcion;
+    $p[] = $request->id_tipo_egreso;
+    $data = $model_emergencias->listar_atencion_emergencia_ajax($p);
+
+    $iTotalDisplayRecords = isset($data[0]->totalrows) ? $data[0]->totalrows : 0;
+    $result["PageStart"] = $request->NumeroPagina;
+    $result["pageSize"] = $request->NumeroRegistros;
+    $result["SearchText"] = "";
+    $result["ShowChildren"] = true;
+    $result["iTotalRecords"] = $iTotalDisplayRecords;
+    $result["iTotalDisplayRecords"] = $iTotalDisplayRecords;
+    $result["aaData"] = $data;
+    //dd($data);
+    echo json_encode($result);
+ 
+  }
+
+  public function anular_paciente_emergencia(Request $request)
+  {
+
+    if (!Auth::check()) :
+      return redirect('/auth/login');
+    endif;
+    
+      $update = Emergencia::where('id', '=', $request->id)->first();
+      $update->estado = 0;
+      $update->updated_user_delete = Carbon::now();
+      $update->id_user_delete = $request->id_user;
+      $update->observacion_elimina_paciente = $request->motivo_anulacion;
+      $update->save();
+      
+      return redirect('/all_admisiones_atendidas_by_emergencia')->withFlashSuccess("Se elimino correctamente al paciente");
+    
+  }
+
+  public function anular_prestacion_emergencia($id_prestacion, $id_emergencia)
+  {
+
+    if (!Auth::check()) :
+      return redirect('/auth/login');
+    endif;
+
+    $prestacion = Prestaciones::where('id', $id_prestacion)->first();
+    $prestacion->id_estado_reg = 0;
+    $prestacion->updated_us = Auth::user()->id;
+    $prestacion->updated_at = Carbon::now();
+    $prestacion->save();
+
+    $cita = Cita::where('id', $prestacion->id_cita)->first();
+    $cita->id_estado_reg = 0;
+    $cita->id_estado_cita = 5;
+    $cita->updated_at = Carbon::now();
+    $cita->updated_us = Auth::user()->id;
+    $cita->save();
+
+    $recetas = Receta_vale::where('id_prestacion', '=', $id_prestacion)->where('estado', '<>', 0)->get();
+    foreach ($recetas as $rv) {
+      $rv->estado = 0;
+      $rv->save();
+    }
+
+    $laboratorio = Laboratorio::where('id_prestacion', $id_prestacion)->where('estado', '<>', 0)->get();
+    foreach ($laboratorio as $lab) {
+      $lab->estado = 0;
+      $lab->save();
+    }
+
+    $radiologia = Radiologia::where('id_prestacion', $id_prestacion)->where('estado', '<>', 0)->get();
+    foreach ($radiologia as $rad) {
+      $rad->estado = 0;
+      $rad->save();
+    }
+
+    $emergencia = Emergencia::where('id', $id_emergencia)->first();
+    $emergencia->estado = 2; //anulado la prestacion
+    $emergencia->id_delete_atencion = Auth::user()->id;
+    $emergencia->updated_delete_atencion = Carbon::now();
+    $emergencia->save();
+
+
+    $array["sw"] = true;
+    echo json_encode($array);
+  }
+  public function modal_paciente_emergencia($id)
+  {
+    
+    $emergencia = \App\Models\Emergencia::find($id);
+    return view('frontend.admision.emergencia.modal_elimina_paciente', compact('id', 'emergencia'));
+  }
+
+  public function obtener_procedimiento_convenio_emergencia($buscar, $nivel, $genero, $tipo)
+  {
+
+    $model_procedimiento = new \App\Models\Procedimiento;
+    $procedimiento = $model_procedimiento->getProcedimientoByConvenioEmergencia($buscar, $nivel, $genero, $tipo);  
+    
+    $array = array();
+    foreach ($procedimiento as $leer) {
+      $array[] = array(
+        "value" => $leer->codigo . " - " . $leer->descripcion,
+        "label" => $leer->codigo . " - " . $leer->descripcion,
+        "id" => $leer->id,
+      );
+    }
+
+    echo json_encode($array);
+  }
+  
+    public function validar_seleccion_llamado($id_ticket) {
+    if (!Auth::check()):
+      return redirect('/auth/login');
+    endif;
+    $model_emergencia = new \App\Models\Emergencia;
+    $ticket=$model_emergencia->consultar_ticket($id_ticket); 
+    return json_encode($ticket); 
+  }
+  public function buscar_reporte_alta(Request $request) {
+    $dato = $request->establecimiento;
+ 
+    $fechaDesde =$request->fecha_ini;
+    $fechaHasta = $request->fecha_fin;
+    $id_establecimiento='';
+    $dni_beneficiario='';
+    $nombre_beneficiario='';
+    $dni_administrador='';
+    $nombre_administrador='';
+    $estado=1; //activo
+    $opcion='Reportes Emergencia';
+    $actualestablecimiento = Auth::user()->id_establecimiento;
+
+    $establecimientos  = "SELECT * from establecimientos e where id_estado_reg = '1' and id = '$actualestablecimiento'";
+    $establecimientos  = DB::select($establecimientos);
+ 
+    if($dato == 1){
+      return view('frontend.medicos.ver_reporte_1', compact('farmacia', 'fechaDesde', 'establecimientos', 'fechaHasta','dni_beneficiario','nombre_beneficiario','dni_administrador','nombre_administrador','estado','opcion'));
+    }else if($dato == 2){
+      return view('frontend.medicos.ver_reporte_2', compact('farmacia', 'fechaDesde', 'establecimientos', 'fechaHasta','dni_beneficiario','nombre_beneficiario','dni_administrador','nombre_administrador','estado','opcion'));
+    }else if($dato == 3){
+      return view('frontend.medicos.ver_reporte_3', compact('farmacia', 'fechaDesde', 'establecimientos', 'fechaHasta','dni_beneficiario','nombre_beneficiario','dni_administrador','nombre_administrador','estado','opcion'));
+    }else if($dato == 4){
+      return view('frontend.medicos.ver_reporte_4', compact('farmacia', 'fechaDesde', 'establecimientos', 'fechaHasta','dni_beneficiario','nombre_beneficiario','dni_administrador','nombre_administrador','estado','opcion'));
+    }else if($dato == 5){
+      return view('frontend.medicos.ver_reporte_5', compact('farmacia', 'fechaDesde', 'establecimientos', 'fechaHasta','dni_beneficiario','nombre_beneficiario','dni_administrador','nombre_administrador','estado','opcion'));
+    }else if($dato == 6){
+      return view('frontend.medicos.ver_reporte_6', compact('farmacia', 'fechaDesde', 'establecimientos', 'fechaHasta','dni_beneficiario','nombre_beneficiario','dni_administrador','nombre_administrador','estado','opcion'));
+    }else if($dato == 7){
+      return view('frontend.medicos.ver_reporte_7', compact('farmacia', 'fechaDesde', 'establecimientos', 'fechaHasta','dni_beneficiario','nombre_beneficiario','dni_administrador','nombre_administrador','estado','opcion'));
+    }else if($dato == 8){
+      return view('frontend.medicos.ver_reporte_8', compact('farmacia', 'fechaDesde', 'establecimientos', 'fechaHasta','dni_beneficiario','nombre_beneficiario','dni_administrador','nombre_administrador','estado','opcion'));
+    }else if($dato == 9){
+      return view('frontend.medicos.ver_reporte_9', compact('farmacia', 'fechaDesde', 'establecimientos', 'fechaHasta','dni_beneficiario','nombre_beneficiario','dni_administrador','nombre_administrador','estado','opcion'));
+    }else if($dato == 10){
+      return view('frontend.medicos.ver_reporte_10', compact('farmacia', 'fechaDesde', 'establecimientos', 'fechaHasta','dni_beneficiario','nombre_beneficiario','dni_administrador','nombre_administrador','estado','opcion'));
+    }else if($dato == 11){
+      return view('frontend.medicos.ver_reporte_11', compact('farmacia', 'fechaDesde', 'establecimientos', 'fechaHasta','dni_beneficiario','nombre_beneficiario','dni_administrador','nombre_administrador','estado','opcion'));
+    }else if($dato == 12){
+      return view('frontend.medicos.ver_reporte_12', compact('farmacia', 'fechaDesde', 'establecimientos', 'fechaHasta','dni_beneficiario','nombre_beneficiario','dni_administrador','nombre_administrador','estado','opcion'));
+    }else if($dato == 13){
+      return view('frontend.medicos.ver_reporte_13', compact('farmacia', 'fechaDesde', 'establecimientos', 'fechaHasta','dni_beneficiario','nombre_beneficiario','dni_administrador','nombre_administrador','estado','opcion'));
+    }else if($dato == 14){
+      return view('frontend.medicos.ver_reporte_14', compact('farmacia', 'fechaDesde', 'establecimientos', 'fechaHasta','dni_beneficiario','nombre_beneficiario','dni_administrador','nombre_administrador','estado','opcion'));
+    }else if($dato == 15){
+      return view('frontend.medicos.ver_reporte_15', compact('farmacia', 'fechaDesde', 'establecimientos', 'fechaHasta','dni_beneficiario','nombre_beneficiario','dni_administrador','nombre_administrador','estado','opcion'));
+    }else if($dato == 16){
+      return view('frontend.medicos.ver_reporte_16', compact('farmacia', 'fechaDesde', 'establecimientos', 'fechaHasta','dni_beneficiario','nombre_beneficiario','dni_administrador','nombre_administrador','estado','opcion'));
+    }else if($dato == 17){
+      return view('frontend.medicos.ver_reporte_17', compact('farmacia', 'fechaDesde', 'establecimientos', 'fechaHasta','dni_beneficiario','nombre_beneficiario','dni_administrador','nombre_administrador','estado','opcion'));
+    }else if($dato == 18){
+      return view('frontend.medicos.ver_reporte_18', compact('farmacia', 'fechaDesde', 'establecimientos', 'fechaHasta','dni_beneficiario','nombre_beneficiario','dni_administrador','nombre_administrador','estado','opcion'));
+    }else if($dato == 19){
+      return view('frontend.medicos.ver_reporte_19', compact('farmacia', 'fechaDesde', 'establecimientos', 'fechaHasta','dni_beneficiario','nombre_beneficiario','dni_administrador','nombre_administrador','estado','opcion'));
+    }else if($dato == 20){
+      return view('frontend.medicos.ver_reporte_20', compact('farmacia', 'fechaDesde', 'establecimientos', 'fechaHasta','dni_beneficiario','nombre_beneficiario','dni_administrador','nombre_administrador','estado','opcion'));
+    }else{
+      return redirect('/auth/login');
+    }
+
+  }
+  //public function registrarExamenComplementarios(Request $request)
+  public function registrarExamenComplementarios(DetalleAtencionFormRequest $request)
+  {
+    
+    if (!Auth::check()) :
+      return redirect('/auth/login');
+    endif;
+
+    $search = array('+', ',','"','/', '{', '}');
+    $replace = array('\+', '\,', '\"', '\/', '\{', '\}');
+    
+    $id_prestacion = $request->id_prestacion;
+    $id_receta_vale = 0;
+  $id_anestesiologo = 0;
+  $obs_registro = "";
+  $id_receta_vale_bus = 0;
+  $id_admision = 0;
+  $tipo_via = "";
+  $sub_via = "";
+  $final_via = "";
+  $nro_guia = "";
+  $interconsulta = "";
+  $interconsulta_dias = 0;
+  $nro_receta = "";
+  $digitos_adicionales = "";
+  $id_tipo_num = 0;
+  $estado_receta = 2;
+  $prestacion = Prestaciones::find($request->id_prestacion);
+  $subconsultorio = SubConsultorio::find($prestacion->id_sub_consultorio);
+  $cita = Cita::find($prestacion->id_cita);
+  $asegurado = Asegurado::find($cita->id_asegurado);
+  $titular = Asegurado::find($cita->id_titular);
+  //$historia = Asegurado_historia::find($cita->id_asegurado);
+  $historia = Asegurado_historia::where('id_asegurado',$cita->id_asegurado)->where('id_establecimiento',$cita->id_establecimiento)->first();
+  //echo $p_diagnostico;exit();
+  //print_r($prestacion);exit();
+
+  $id_medico = $prestacion->id_medico;
+  $id_tiporeceta = $prestacion->id_tipo_atencion;
+  $codigo_upss = $prestacion->codigo_upss;
+  $fecha_atencion = $request->fecha_expedicion;
+  $id_consultorio = $subconsultorio->id_consultorio;
+  $grado = $cita->grado;
+  $tipo_beneficiario = $cita->parentesco;
+
+  $dni_beneficiario = $asegurado->nro_doc_ident;
+  $cip_beneficiario = $asegurado->cip;
+  $tipodoc_beneficiario = $asegurado->tipo_doc_ident;
+  $nombre_beneficiario = $asegurado->nombre;
+  $paterno_beneficiario = $asegurado->paterno;
+  $materno_beneficiario = $asegurado->materno;
+  $sexo = $asegurado->sexo;
+  $fecha_nacimiento = $asegurado->fecha_nac;
+  $dni_titular = $titular->nro_doc_ident;
+  $tipdoc_titular = $titular->tipo_doc_ident;
+  $nombre_titular = $titular->nombre;
+  $paterno_titular = $titular->paterno;
+  $materno_titular = $titular->materno;
+  $receta_prescrita        =  0;
+    $request->id_modalidad = 1;
+    if($request->id_tipo_atencion==2){
+      $id_emergencia = $request->id_cita;
+      $id_hospitalizacion = 0;
+      $id_cita= 0;
+    }
+    else
+    {
+      $id_hospitalizacion = $request->id_cita;
+      $id_cita= 0; 
+      $id_emergencia = 0;
+    }
+
+    $model_prestaciones = new Prestaciones();
+  $receta = new Receta_Vale();
+  $diagnosticos = $model_prestaciones->GetDiagnosticoByIdPrestacion($id_prestacion);
+  $p_diagnostico = "";
+  $p_diagnostico .= "{";
+  foreach ($diagnosticos as $row) :
+    $p_diagnostico .= "{";
+    $p_diagnostico .= $row->id_diagnostico . ",";
+    //$p_diagnostico.=$row->id_tipo_diagnostico;
+    $p_diagnostico .= ($row->id_tipo_diagnostico > 0) ? $row->id_tipo_diagnostico : "0";
+    $p_diagnostico .= "},";
+  endforeach;
+  $p_diagnostico = substr($p_diagnostico, 0, -1);
+  $p_diagnostico .= "}";
+
+  
+  
+
+    $p_producto = "";
+    $p_producto .= "{";
+    if (isset($request->id_producto)) :
+      $receta_prescrita=1;
+      foreach ($request->id_producto as $key => $value) :
+        if ($request->id_producto[$key] != "") {
+          $p_producto .= "{";
+          $p_producto .= $request->id_producto[$key] . ",";
+          $p_producto .= $request->tiempo_periodo[$key] . ",";
+          $p_producto .= $request->nro_med_solictados[$key] . ",";
+          $p_producto .= (isset($request->nro_med_entregados[$key]) && $request->nro_med_entregados[$key] != "") ? $request->nro_med_entregados[$key] : 0;
+          $p_producto .= ",";
+          $p_producto .= (isset($request->nro_stocks_almacen[$key]) && $request->nro_stocks_almacen[$key] != "") ? $request->nro_stocks_almacen[$key] : 0;
+          $p_producto .= ",";
+          $p_producto .= (isset($request->nro_stocks_establecimiento[$key]) && $request->nro_stocks_establecimiento[$key] != "") ? $request->nro_stocks_establecimiento[$key] : 0;
+          $p_producto .= ",";
+          $p_producto .= (isset($request->nro_stocks[$key]) && $request->nro_stocks[$key] != "") ? $request->nro_stocks[$key] : 0;
+          $p_producto .= ",";
+          $p_producto .= (isset($request->posologia[$key]) && $request->posologia[$key] != "") ? str_replace(",", "###", $request->posologia[$key]) : "-";
+          $p_producto .= ",";
+          $p_producto .= (isset($request->miSelectProd[$key]) && $request->miSelectProd[$key] != "") ? $request->miSelectProd[$key] : 0;
+          $p_producto .= ",";
+          $p_producto .= $request->id_via_administracion[$key];
+          $p_producto .= "},";
+        }
+      endforeach;
+      if (strlen($p_producto) > 1) $p_producto = substr($p_producto, 0, -1);
+    endif;
+    $p_producto .= "}";
+
+    /*********************************************************************/
+    $model_procedimiento = new \App\Models\Procedimiento;
+    if (isset($request->id_examen_lab)) :
+      $p_laboratorio = "";
+      $p_laboratorio .= "{";
+      foreach ($request->id_examen_lab as $key => $value) :
+        if ($request->id_examen_lab[$key] != "") {
+          $p_laboratorio .= "{";
+          $p_laboratorio .= $request->id_examen_lab[$key] . ",";
+          if (intval($request->id_nivel) === 3):
+            $p_laboratorio .= "0";
+          else:
+          $p_laboratorio .= (isset($request->examen_lab_observacion[$key]) && $request->examen_lab_observacion[$key] !="") ? str_replace($search, $replace, $request->examen_lab_observacion[$key]) : "0";
+          endif;
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->examen_lab_cantidad[$key]) && $request->examen_lab_cantidad[$key] > 0) ? $request->examen_lab_cantidad[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->miSelectLab[$key]) && $request->miSelectLab[$key] !="") ? $request->miSelectLab[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->descripcion_tipo_muestra[$key]) && $request->descripcion_tipo_muestra[$key] !="") ? $request->descripcion_tipo_muestra[$key] : "0";
+          /** EXAMEN PARA HEMOCULTIVO PARA ADULTO */
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_adulto_fecha_tiempo_enfermedad[$key]) && $request->des_adulto_fecha_tiempo_enfermedad[$key] !="") ? $request->des_adulto_fecha_tiempo_enfermedad[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_adulto_respuesta_ocular[$key]) && $request->des_adulto_respuesta_ocular[$key] !="") ? $request->des_adulto_respuesta_ocular[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_adulto_respuesta_verbal[$key]) && $request->des_adulto_respuesta_verbal[$key] !="") ? $request->des_adulto_respuesta_verbal[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_adulto_respuesta_motora[$key]) && $request->des_adulto_respuesta_motora[$key] !="") ? $request->des_adulto_respuesta_motora[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_adulto_total_escala_glasgow[$key]) && $request->des_adulto_total_escala_glasgow[$key] !="") ? $request->des_adulto_total_escala_glasgow[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_adulto_presion_arterial_x[$key]) && $request->des_adulto_presion_arterial_x[$key] !="") ? $request->des_adulto_presion_arterial_x[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_adulto_presion_arterial_y[$key]) && $request->des_adulto_presion_arterial_y[$key] !="") ? $request->des_adulto_presion_arterial_y[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_adulto_frecuencia_cardiaca[$key]) && $request->des_adulto_frecuencia_cardiaca[$key] !="") ? $request->des_adulto_frecuencia_cardiaca[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_adulto_frecuencia_respiratorio[$key]) && $request->des_adulto_frecuencia_respiratorio[$key] !="") ? $request->des_adulto_frecuencia_respiratorio[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_adulto_temperatura[$key]) && $request->des_adulto_temperatura[$key] !="") ? $request->des_adulto_temperatura[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_adulto_creatinina[$key]) && $request->des_adulto_creatinina[$key] !="") ? $request->des_adulto_creatinina[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_adulto_diuresis[$key]) && $request->des_adulto_diuresis[$key] !="") ? $request->des_adulto_diuresis[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_adulto_procalcitonina[$key]) && $request->des_adulto_procalcitonina[$key] !="") ? $request->des_adulto_procalcitonina[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_adulto_pcr[$key]) && $request->des_adulto_pcr[$key] !="") ? $request->des_adulto_pcr[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_adulto_fiO2[$key]) && $request->des_adulto_fiO2[$key] !="") ? $request->des_adulto_fiO2[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_adulto_leucocitos[$key]) && $request->des_adulto_leucocitos[$key] !="") ? $request->des_adulto_leucocitos[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_adulto_plaquetas[$key]) && $request->des_adulto_plaquetas[$key] !="") ? $request->des_adulto_plaquetas[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_adulto_bilirrubina[$key]) && $request->des_adulto_bilirrubina[$key] !="") ? $request->des_adulto_bilirrubina[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_adulto_ima[$key]) && $request->des_adulto_ima[$key] !="") ? $request->des_adulto_ima[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_adulto_icc[$key]) && $request->des_adulto_icc[$key] !="") ? $request->des_adulto_icc[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_adulto_evp[$key]) && $request->des_adulto_evp[$key] !="") ? $request->des_adulto_evp[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_adulto_ecv[$key]) && $request->des_adulto_ecv[$key] !="") ? $request->des_adulto_ecv[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_adulto_demencia[$key]) && $request->des_adulto_demencia[$key] !="") ? $request->des_adulto_demencia[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_adulto_dm[$key]) && $request->des_adulto_dm[$key] !="") ? $request->des_adulto_dm[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_adulto_diabetes_lesion_organica[$key]) && $request->des_adulto_diabetes_lesion_organica[$key] !="") ? $request->des_adulto_diabetes_lesion_organica[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_adulto_hemiplejia[$key]) && $request->des_adulto_hemiplejia[$key] !="") ? $request->des_adulto_hemiplejia[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_adulto_epoc[$key]) && $request->des_adulto_epoc[$key] !="") ? $request->des_adulto_epoc[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_adulto_patologia_tejido_conectivo[$key]) && $request->des_adulto_patologia_tejido_conectivo[$key] !="") ? $request->des_adulto_patologia_tejido_conectivo[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_adulto_enfermedad_ulcerosa[$key]) && $request->des_adulto_enfermedad_ulcerosa[$key] !="") ? $request->des_adulto_enfermedad_ulcerosa[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_adulto_patologia_renal_moderada_o_grave[$key]) && $request->des_adulto_patologia_renal_moderada_o_grave[$key] !="") ? $request->des_adulto_patologia_renal_moderada_o_grave[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_adulto_neoplasias[$key]) && $request->des_adulto_neoplasias[$key] !="") ? $request->des_adulto_neoplasias[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_adulto_neoplasias_especifique[$key]) && $request->des_adulto_neoplasias_especifique[$key] !="") ? $request->des_adulto_neoplasias_especifique[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_adulto_leucemias[$key]) && $request->des_adulto_leucemias[$key] !="") ? $request->des_adulto_leucemias[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_adulto_leucemias_especifique[$key]) && $request->des_adulto_leucemias_especifique[$key] !="") ? $request->des_adulto_leucemias_especifique[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_adulto_linfomas_malignos[$key]) && $request->des_adulto_linfomas_malignos[$key] !="") ? $request->des_adulto_linfomas_malignos[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_adulto_metastasis_colida[$key]) && $request->des_adulto_metastasis_colida[$key] !="") ? $request->des_adulto_metastasis_colida[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_adulto_sida[$key]) && $request->des_adulto_sida[$key] !="") ? $request->des_adulto_sida[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_adulto_antecedentes_patologicos_otros_1[$key]) && $request->des_adulto_antecedentes_patologicos_otros_1[$key] !="") ? $request->des_adulto_antecedentes_patologicos_otros_1[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_adulto_antecedentes_patologicos_otros_1_especifique[$key]) && $request->des_adulto_antecedentes_patologicos_otros_1_especifique[$key] !="") ? $request->des_adulto_antecedentes_patologicos_otros_1_especifique[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_adulto_antecedentes_patologicos_otros_2[$key]) && $request->des_adulto_antecedentes_patologicos_otros_2[$key] !="") ? $request->des_adulto_antecedentes_patologicos_otros_2[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_adulto_antecedentes_patologicos_otros_2_especifique[$key]) && $request->des_adulto_antecedentes_patologicos_otros_2_especifique[$key] !="") ? $request->des_adulto_antecedentes_patologicos_otros_2_especifique[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_adulto_terapia_antimicrobiana[$key]) && $request->des_adulto_terapia_antimicrobiana[$key] !="") ? $request->des_adulto_terapia_antimicrobiana[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_adulto_frasco_1[$key]) && $request->des_adulto_frasco_1[$key] !="") ? $request->des_adulto_frasco_1[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_adulto_frasco_1_opcion_1[$key]) && $request->des_adulto_frasco_1_opcion_1[$key] !="") ? $request->des_adulto_frasco_1_opcion_1[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_adulto_frasco_1_opcion_2[$key]) && $request->des_adulto_frasco_1_opcion_2[$key] !="") ? $request->des_adulto_frasco_1_opcion_2[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_adulto_frasco_2[$key]) && $request->des_adulto_frasco_2[$key] !="") ? $request->des_adulto_frasco_2[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_adulto_frasco_2_opcion_1[$key]) && $request->des_adulto_frasco_2_opcion_1[$key] !="") ? $request->des_adulto_frasco_2_opcion_1[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_adulto_frasco_2_opcion_2[$key]) && $request->des_adulto_frasco_2_opcion_2[$key] !="") ? $request->des_adulto_frasco_2_opcion_2[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_adulto_frasco_3[$key]) && $request->des_adulto_frasco_3[$key] !="") ? $request->des_adulto_frasco_3[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_adulto_frasco_3_opcion_1[$key]) && $request->des_adulto_frasco_3_opcion_1[$key] !="") ? $request->des_adulto_frasco_3_opcion_1[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_adulto_frasco_3_opcion_2[$key]) && $request->des_adulto_frasco_3_opcion_2[$key] !="") ? $request->des_adulto_frasco_3_opcion_2[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_adulto_hemocultivo_seguimiento_y_vigilancia[$key]) && $request->des_adulto_hemocultivo_seguimiento_y_vigilancia[$key] !="") ? $request->des_adulto_hemocultivo_seguimiento_y_vigilancia[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_adulto_fecha_primer_resultado_hemocultivo[$key]) && $request->des_adulto_fecha_primer_resultado_hemocultivo[$key] !="") ? $request->des_adulto_fecha_primer_resultado_hemocultivo[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->flag_solicitud_examen_especializados_hemocultivo_adulto[$key]) && $request->flag_solicitud_examen_especializados_hemocultivo_adulto[$key] !="") ? $request->flag_solicitud_examen_especializados_hemocultivo_adulto[$key] : "0";
+          /******************************************************* EXAMEN PARA HEMOCULTIVO PARA NEONATO Y PEDRIATRÍA *******************************************************/
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->descripcion_examen[$key]) && $request->descripcion_examen[$key] !="") ? $request->descripcion_examen[$key] : "0"; /** NOMBRE O DESCRIPCIÓN DEL EXAMEN ESPECIALIZADO */
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_pedriatria_fecha_tiempo_enfermedad[$key]) && $request->des_pedriatria_fecha_tiempo_enfermedad[$key] !="") ? $request->des_pedriatria_fecha_tiempo_enfermedad[$key] : "0";
+          /** EDAD GESTIONAL **/
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_pedriatria_postermino[$key]) && $request->des_pedriatria_postermino[$key] !="") ? $request->des_pedriatria_postermino[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_pedriatria_termino[$key]) && $request->des_pedriatria_termino[$key] !="") ? $request->des_pedriatria_termino[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_pedriatria_prematuro_leve[$key]) && $request->des_pedriatria_prematuro_leve[$key] !="") ? $request->des_pedriatria_prematuro_leve[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_pedriatria_prematuro_moderado[$key]) && $request->des_pedriatria_prematuro_moderado[$key] !="") ? $request->des_pedriatria_prematuro_moderado[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_pedriatria_prematuro_extremo[$key]) && $request->des_pedriatria_prematuro_extremo[$key] !="") ? $request->des_pedriatria_prematuro_extremo[$key] : "0";
+          /** APGAR **/
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_pedriatria_apariencia[$key]) && $request->des_pedriatria_apariencia[$key] !="") ? $request->des_pedriatria_apariencia[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_pedriatria_pulso[$key]) && $request->des_pedriatria_pulso[$key] !="") ? $request->des_pedriatria_pulso[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_pedriatria_gesto[$key]) && $request->des_pedriatria_gesto[$key] !="") ? $request->des_pedriatria_gesto[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_pedriatria_actividad_respiratoria[$key]) && $request->des_pedriatria_actividad_respiratoria[$key] !="") ? $request->des_pedriatria_actividad_respiratoria[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_pedriatria_total_apgar[$key]) && $request->des_pedriatria_total_apgar[$key] !="") ? $request->des_pedriatria_total_apgar[$key] : "0";
+          /** ESCALA DE GLASGOW **/
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_pedriatria_respuesta_ocular[$key]) && $request->des_pedriatria_respuesta_ocular[$key] !="") ? $request->des_pedriatria_respuesta_ocular[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_pedriatria_respuesta_verbal[$key]) && $request->des_pedriatria_respuesta_verbal[$key] !="") ? $request->des_pedriatria_respuesta_verbal[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_pedriatria_respuesta_motora[$key]) && $request->des_pedriatria_respuesta_motora[$key] !="") ? $request->des_pedriatria_respuesta_motora[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_pedriatria_total_escala_glasgow[$key]) && $request->des_pedriatria_total_escala_glasgow[$key] !="") ? $request->des_pedriatria_total_escala_glasgow[$key] : "0";
+          /** SIGNOS VITALES **/
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_pedriatria_presion_arterial_x[$key]) && $request->des_pedriatria_presion_arterial_x[$key] !="") ? $request->des_pedriatria_presion_arterial_x[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_pedriatria_presion_arterial_y[$key]) && $request->des_pedriatria_presion_arterial_y[$key] !="") ? $request->des_pedriatria_presion_arterial_y[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_pedriatria_frecuencia_cardiaca[$key]) && $request->des_pedriatria_frecuencia_cardiaca[$key] !="") ? $request->des_pedriatria_frecuencia_cardiaca[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_pedriatria_frecuencia_respiratorio[$key]) && $request->des_pedriatria_frecuencia_respiratorio[$key] !="") ? $request->des_pedriatria_frecuencia_respiratorio[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_pedriatria_temperatura[$key]) && $request->des_pedriatria_temperatura[$key] !="") ? $request->des_pedriatria_temperatura[$key] : "0";
+          /** EXÁMENES DE LABORATORIO **/
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_pedriatria_creatinina[$key]) && $request->des_pedriatria_creatinina[$key] !="") ? $request->des_pedriatria_creatinina[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_pedriatria_diuresis[$key]) && $request->des_pedriatria_diuresis[$key] !="") ? $request->des_pedriatria_diuresis[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_pedriatria_procalcitonina[$key]) && $request->des_pedriatria_procalcitonina[$key] !="") ? $request->des_pedriatria_procalcitonina[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_pedriatria_pcr[$key]) && $request->des_pedriatria_pcr[$key] !="") ? $request->des_pedriatria_pcr[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_pedriatria_fiO2[$key]) && $request->des_pedriatria_fiO2[$key] !="") ? $request->des_pedriatria_fiO2[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_pedriatria_leucocitos[$key]) && $request->des_pedriatria_leucocitos[$key] !="") ? $request->des_pedriatria_leucocitos[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_pedriatria_plaquetas[$key]) && $request->des_pedriatria_plaquetas[$key] !="") ? $request->des_pedriatria_plaquetas[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_pedriatria_bilirrubina[$key]) && $request->des_pedriatria_bilirrubina[$key] !="") ? $request->des_pedriatria_bilirrubina[$key] : "0";
+          
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_pedriatria_glucosa[$key]) && $request->des_pedriatria_glucosa[$key] !="") ? $request->des_pedriatria_glucosa[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_pedriatria_alt[$key]) && $request->des_pedriatria_alt[$key] !="") ? $request->des_pedriatria_alt[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_pedriatria_vcg[$key]) && $request->des_pedriatria_vcg[$key] !="") ? $request->des_pedriatria_vcg[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_pedriatria_tp[$key]) && $request->des_pedriatria_tp[$key] !="") ? $request->des_pedriatria_tp[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_pedriatria_sodio[$key]) && $request->des_pedriatria_sodio[$key] !="") ? $request->des_pedriatria_sodio[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_pedriatria_potasio[$key]) && $request->des_pedriatria_potasio[$key] !="") ? $request->des_pedriatria_potasio[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_pedriatria_calcio[$key]) && $request->des_pedriatria_calcio[$key] !="") ? $request->des_pedriatria_calcio[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_pedriatria_pco2[$key]) && $request->des_pedriatria_pco2[$key] !="") ? $request->des_pedriatria_pco2[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_pedriatria_tpta[$key]) && $request->des_pedriatria_tpta[$key] !="") ? $request->des_pedriatria_tpta[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_pedriatria_examen_laboratorio_otros[$key]) && $request->des_pedriatria_examen_laboratorio_otros[$key] !="") ? $request->des_pedriatria_examen_laboratorio_otros[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_pedriatria_examen_laboratorio_otros_especifique[$key]) && $request->des_pedriatria_examen_laboratorio_otros_especifique[$key] !="") ? $request->des_pedriatria_examen_laboratorio_otros_especifique[$key] : "0";
+          /** TERAPIA ANTIMICROBIANA **/
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_pedriatria_terapia_antimicrobiana[$key]) && $request->des_pedriatria_terapia_antimicrobiana[$key] !="") ? $request->des_pedriatria_terapia_antimicrobiana[$key] : "0";
+          /** SOLICITUD DE FRASCO DE HEMOCULTIVO **/
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_pedriatria_frasco_1[$key]) && $request->des_pedriatria_frasco_1[$key] !="") ? $request->des_pedriatria_frasco_1[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_pedriatria_frasco_1_opcion_1[$key]) && $request->des_pedriatria_frasco_1_opcion_1[$key] !="") ? $request->des_pedriatria_frasco_1_opcion_1[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_pedriatria_frasco_1_opcion_2[$key]) && $request->des_pedriatria_frasco_1_opcion_2[$key] !="") ? $request->des_pedriatria_frasco_1_opcion_2[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_pedriatria_frasco_2[$key]) && $request->des_pedriatria_frasco_2[$key] !="") ? $request->des_pedriatria_frasco_2[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_pedriatria_frasco_2_opcion_1[$key]) && $request->des_pedriatria_frasco_2_opcion_1[$key] !="") ? $request->des_pedriatria_frasco_2_opcion_1[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_pedriatria_frasco_2_opcion_2[$key]) && $request->des_pedriatria_frasco_2_opcion_2[$key] !="") ? $request->des_pedriatria_frasco_2_opcion_2[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_pedriatria_frasco_3[$key]) && $request->des_pedriatria_frasco_3[$key] !="") ? $request->des_pedriatria_frasco_3[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_pedriatria_frasco_3_opcion_1[$key]) && $request->des_pedriatria_frasco_3_opcion_1[$key] !="") ? $request->des_pedriatria_frasco_3_opcion_1[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_pedriatria_frasco_3_opcion_2[$key]) && $request->des_pedriatria_frasco_3_opcion_2[$key] !="") ? $request->des_pedriatria_frasco_3_opcion_2[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_pedriatria_hemocultivo_seguimiento_y_vigilancia[$key]) && $request->des_pedriatria_hemocultivo_seguimiento_y_vigilancia[$key] !="") ? $request->des_pedriatria_hemocultivo_seguimiento_y_vigilancia[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_pedriatria_fecha_primer_resultado_hemocultivo[$key]) && $request->des_pedriatria_fecha_primer_resultado_hemocultivo[$key] !="") ? $request->des_pedriatria_fecha_primer_resultado_hemocultivo[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->flag_solicitud_examen_especializados_hemocultivo_pedriatria[$key]) && $request->flag_solicitud_examen_especializados_hemocultivo_pedriatria[$key] !="") ? $request->flag_solicitud_examen_especializados_hemocultivo_pedriatria[$key] : "0";
+          $p_laboratorio .= ",";
+          // ====================== SOLICITUD PARA ESTUDIO CITOQUÍMICO LÍQUIDOS BIOLÓGICOS  ===============================================
+          $p_laboratorio .= (isset($request->des_antecedentes_patologicos_personales[$key]) && $request->des_antecedentes_patologicos_personales[$key] !="") ? $request->des_antecedentes_patologicos_personales[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_antecedentes_patologicos_familiares[$key]) && $request->des_antecedentes_patologicos_familiares[$key] !="") ? $request->des_antecedentes_patologicos_familiares[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_liquido_cefaloraquideo[$key]) && $request->des_liquido_cefaloraquideo[$key] !="") ? $request->des_liquido_cefaloraquideo[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_liquido_pleural[$key]) && $request->des_liquido_pleural[$key] !="") ? $request->des_liquido_pleural[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_liquido_ascitico[$key]) && $request->des_liquido_ascitico[$key] !="") ? $request->des_liquido_ascitico[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_liquido_sinovial[$key]) && $request->des_liquido_sinovial[$key] !="") ? $request->des_liquido_sinovial[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_liquido_otro[$key]) && $request->des_liquido_otro[$key] !="") ? $request->des_liquido_otro[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_liquido_otro_especifique[$key]) && $request->des_liquido_otro_especifique[$key] !="") ? $request->des_liquido_otro_especifique[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_num_frasco_muestra_opcion[$key]) && $request->des_num_frasco_muestra_opcion[$key] !="") ? $request->des_num_frasco_muestra_opcion[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->flag_solicitud_citoquimicos_liquidos_biologicos[$key]) && $request->flag_solicitud_citoquimicos_liquidos_biologicos[$key] !="") ? $request->flag_solicitud_citoquimicos_liquidos_biologicos[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_pedriatria_tono_muscular[$key]) && $request->des_pedriatria_tono_muscular[$key] !="") ? $request->des_pedriatria_tono_muscular[$key] : "0";
+          /******************************************************* SOLICITUD TEST DE TOLERANCIA A LA GLUCOSA ORAL *******************************************************/
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_tolerancia_paciente_pediatrico_ttgo[$key]) && $request->des_tolerancia_paciente_pediatrico_ttgo[$key] !="") ? $request->des_tolerancia_paciente_pediatrico_ttgo[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_fecha_tolerancia_paciente_pediatrico_ttgo[$key]) && $request->des_fecha_tolerancia_paciente_pediatrico_ttgo[$key] !="") ? $request->des_fecha_tolerancia_paciente_pediatrico_ttgo[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_tolerancia_paciente_pediatrico_glucosa_anhidra[$key]) && $request->des_tolerancia_paciente_pediatrico_glucosa_anhidra[$key] !="") ? $request->des_tolerancia_paciente_pediatrico_glucosa_anhidra[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_cantidad_tolerancia_paciente_pediatrico_glucosa_anhidra[$key]) && $request->des_cantidad_tolerancia_paciente_pediatrico_glucosa_anhidra[$key] !="") ? $request->des_cantidad_tolerancia_paciente_pediatrico_glucosa_anhidra[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_tolerancia_paciente_adulto_ttgo[$key]) && $request->des_tolerancia_paciente_adulto_ttgo[$key] !="") ? $request->des_tolerancia_paciente_adulto_ttgo[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_fecha_tolerancia_paciente_adulto_ttgo[$key]) && $request->des_fecha_tolerancia_paciente_adulto_ttgo[$key] !="") ? $request->des_fecha_tolerancia_paciente_adulto_ttgo[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_tolerancia_paciente_adulto_glucosa_anhidra[$key]) && $request->des_tolerancia_paciente_adulto_glucosa_anhidra[$key] !="") ? $request->des_tolerancia_paciente_adulto_glucosa_anhidra[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_cantidad_tolerancia_paciente_adulto_glucosa_anhidra[$key]) && $request->des_cantidad_tolerancia_paciente_adulto_glucosa_anhidra[$key] !="") ? $request->des_cantidad_tolerancia_paciente_adulto_glucosa_anhidra[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_tolerancia_paciente_gestante_g[$key]) && $request->des_tolerancia_paciente_gestante_g[$key] !="") ? $request->des_tolerancia_paciente_gestante_g[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_tolerancia_paciente_gestante_p_1[$key]) && $request->des_tolerancia_paciente_gestante_p_1[$key] !="") ? $request->des_tolerancia_paciente_gestante_p_1[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_tolerancia_paciente_gestante_p_2[$key]) && $request->des_tolerancia_paciente_gestante_p_2[$key] !="") ? $request->des_tolerancia_paciente_gestante_p_2[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_tolerancia_paciente_gestante_p_3[$key]) && $request->des_tolerancia_paciente_gestante_p_3[$key] !="") ? $request->des_tolerancia_paciente_gestante_p_3[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_tolerancia_paciente_gestante_p_4[$key]) && $request->des_tolerancia_paciente_gestante_p_4[$key] !="") ? $request->des_tolerancia_paciente_gestante_p_4[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_tolerancia_paciente_gestante_edad_gestacional_meses[$key]) && $request->des_tolerancia_paciente_gestante_edad_gestacional_meses[$key] !="") ? $request->des_tolerancia_paciente_gestante_edad_gestacional_meses[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_tolerancia_paciente_gestante_edad_gestacional_semanas[$key]) && $request->des_tolerancia_paciente_gestante_edad_gestacional_semanas[$key] !="") ? $request->des_tolerancia_paciente_gestante_edad_gestacional_semanas[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_tolerancia_paciente_gestante_edad_gestacional_dias[$key]) && $request->des_tolerancia_paciente_gestante_edad_gestacional_dias[$key] !="") ? $request->des_tolerancia_paciente_gestante_edad_gestacional_dias[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_tolerancia_paciente_gestante_ttgo[$key]) && $request->des_tolerancia_paciente_gestante_ttgo[$key] !="") ? $request->des_tolerancia_paciente_gestante_ttgo[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_fecha_tolerancia_paciente_gestante_ttgo[$key]) && $request->des_fecha_tolerancia_paciente_gestante_ttgo[$key] !="") ? $request->des_fecha_tolerancia_paciente_gestante_ttgo[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_tolerancia_paciente_gestante_glucosa_anhidra[$key]) && $request->des_tolerancia_paciente_gestante_glucosa_anhidra[$key] !="") ? $request->des_tolerancia_paciente_gestante_glucosa_anhidra[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_cantidad_tolerancia_paciente_gestante_glucosa_anhidra[$key]) && $request->des_cantidad_tolerancia_paciente_gestante_glucosa_anhidra[$key] !="") ? $request->des_cantidad_tolerancia_paciente_gestante_glucosa_anhidra[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_tolerancia_paciente_gestante_factores_riesgo[$key]) && $request->des_tolerancia_paciente_gestante_factores_riesgo[$key] !="") ? $request->des_tolerancia_paciente_gestante_factores_riesgo[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->des_especifique_tolerancia_paciente_gestante_factores_riesgo[$key]) && $request->des_especifique_tolerancia_paciente_gestante_factores_riesgo[$key] !="") ? $request->des_especifique_tolerancia_paciente_gestante_factores_riesgo[$key] : "0";
+          $p_laboratorio .= ",";
+          $p_laboratorio .= (isset($request->flag_solicitud_test_tolerancia_glucosa_oral[$key]) && $request->flag_solicitud_test_tolerancia_glucosa_oral[$key] !="") ? $request->flag_solicitud_test_tolerancia_glucosa_oral[$key] : "0";
+          $p_laboratorio .= ",0";
+          $p_laboratorio .= "},";
+        }
+      endforeach;
+      if (strlen($p_laboratorio) > 1) $p_laboratorio = substr($p_laboratorio, 0, -1);
+      $p_laboratorio .= "}";
+      if($request->id_examen_lab[0]!=""):
+
+        if (intval($request->id_establecimiento) === 76):
+          
+          $has_observacion_unica = (intval($request->id_nivel) === 3) ? 1 : 0;
+          $id_evaluacion = 0;
+          $id_interconsulta = 0;
+          $lab_orden_observacion_unica = intval($request->id_nivel) === 3 ? $request->lab_orden_observacion : null;
+          $flag_cq = 0;
+          $id_hora_toma_muestra = null;
+
+          $id_procedimiento_lab = $model_procedimiento->RegistrarLaboratorioOrden3($request->id_user, $id_prestacion, $request->id_establecimiento, $request->fecha_atencion, $p_laboratorio, $has_observacion_unica, $id_evaluacion, $request->id_farmacia, $id_interconsulta, $request->id_tipo_atencion, 76, $request->id_topico, $request->id_cama, $request->id_medico, $request->id_asegurado, $lab_orden_observacion_unica, $flag_cq, $id_hora_toma_muestra);
+        else:
+        $id_procedimiento_lab = $model_procedimiento->RegistrarLaboratorioOrden2($request->id_user, $id_prestacion, $request->id_establecimiento, $request->fecha_atencion, $p_laboratorio, 2, 0, $request->id_farmacia, 0, $request->id_tipo_atencion, 76, $request->id_topico, $request->id_cama, $request->id_medico, $request->id_asegurado);
+        endif;
+      endif;
+    endif;
+
+  /*function escape_pg_value($value) {
+    if ($value === null || $value === '') return 'NULL';
+    if (is_numeric($value)) return $value;
+    $escaped = str_replace(['\\', '"'], ['\\\\', '\\"'], $value);
+    return '"' . $escaped . '"';
+  }*/
+  if (isset($request->id_examen_rad)) :
+  $p_radiologia = "";
+  $p_radiologia .= "{";
+  foreach ($request->id_examen_rad as $key => $value) :
+    if ($request->id_examen_rad[$key] != "") {
+      $p_radiologia .= "{";
+      $p_radiologia .= $request->id_examen_rad[$key] . ",";
+      $p_radiologia .= (isset($request->examen_rad_cantidad[$key]) && $request->examen_rad_cantidad[$key] > 0) ? $request->examen_rad_cantidad[$key] : "0";
+      $p_radiologia .= ",";
+      $p_radiologia .= (isset($request->examen_rad_observacion[$key]) && $request->examen_rad_observacion[$key] !="") ? str_replace($search, $replace, $request->examen_rad_observacion[$key]) : 'NULL';
+      $p_radiologia .= ",";
+      $p_radiologia .= (isset($request->id_comparativo[$key]) && $request->id_comparativo[$key] !="") ? $request->id_comparativo[$key] : "0";
+      $p_radiologia .= ",";
+      $p_radiologia .= (isset($request->id_lado[$key]) && $request->id_lado[$key] !="") ? $request->id_lado[$key] : "0";
+      $p_radiologia .= ",";
+      $p_radiologia .= (isset($request->miSelectRad[$key]) && $request->miSelectRad[$key] !="") ? $request->miSelectRad[$key] : "0";
+      $p_radiologia .= ",";
+      $p_radiologia .= (isset($request->radio_portatil[$key]) && $request->radio_portatil[$key] !="") ? $request->radio_portatil[$key] : "0";
+      $p_radiologia .= "},";
+    }
+  endforeach;
+  if (strlen($p_radiologia) > 1) $p_radiologia = substr($p_radiologia, 0, -1);
+  $p_radiologia .= "}";
+  if($request->id_examen_rad[0]!=""):
+    $id_procedimiento_rad = $model_procedimiento->RegistrarProcedimientoImagenes($request->id_user, $id_prestacion, $request->id_establecimiento, $request->fecha_atencion, $p_radiologia, 3, 0, $request->id_farmacia);
+    /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////// Identificar radiología a la cual pertenece 
+    if($request->id_establecimiento == 76 ){
+      $updated = DB::table('rua_imagenologia')->where('id', $request->id_rua_imagenes)->update(['id_rad' => $id_procedimiento_rad, 'id_estado_reg' => 1]);
+    }
+    ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+  endif;
+endif;
+    /***************************************************************************/
+    $date = Carbon::now();
+    $hora=$date->toTimeString(); 
+
+    if($hora>'01:30' & $hora<'07:31'):
+      /*echo*/ $turno='MD';
+    else:
+      if($hora>'07:30' & $hora<'13:31'):
+        /*echo*/ $turno='M';
+      else:
+        if($hora>'13:30' & $hora<'19:31'):
+          /*echo*/ $turno='T';
+        else:
+          if($hora>'19:30' & $hora<='23:59'):
+            /*echo*/ $turno='N';
+          else:
+            if($hora>='00:00' & $hora<='01:31'):
+              /*echo*/ $turno='N';
+            endif;
+          endif;
+        endif;
+      endif;
+    endif;
+
+    // $search  = array('+', ',','"','/');
+    // $replace = array('\+', '\,', '\"', '\/');
+
+    $model_interconsulta = new \App\Models\Interconsulta;
+      if(!empty($request->id_servicio_interconsulta)):
+        $p_interconsulta = "";
+        $p_interconsulta .= "{";
+        foreach ($request->id_servicio_interconsulta as $key => $value) :
+
+          $personal_coordinacion = $request->interconsulta_personal_coodinacion[$key];
+          $personal_coordinacion = $personal_coordinacion != "" ? $personal_coordinacion : "NULL";
+
+          if ($request->id_servicio_interconsulta[$key] != "") {
+            $p_interconsulta .= "{";
+            $p_interconsulta .= $request->id_servicio_interconsulta[$key] . ",";
+            $p_interconsulta .= $turno . ",";
+            $p_interconsulta .= "0,";
+            $p_interconsulta .= str_replace($search, $replace, $request->motivo_interconsulta[$key]) . ",";
+            $p_interconsulta .= "0,0,";
+            $p_interconsulta .= $request->is_estable . ",";
+            $p_interconsulta .= $personal_coordinacion;
+            $p_interconsulta .= "},";
+          }
+        endforeach;
+        if (strlen($p_interconsulta) > 1) $p_interconsulta = substr($p_interconsulta, 0, -1);
+        $p_interconsulta .= "}"; 
+
+        if($request->id_servicio_interconsulta[0]!=""):
+          $id_interconsulta = $model_interconsulta->RegistrarInterconsulta($id_prestacion, $request->id_asegurado, $request->id_tipo_atencion, $request->fecha_atencion, $request->id_medico, $request->id_establecimiento, $p_interconsulta);
+        endif;
+      endif;
+    
+    if (isset($request->id_producto)) :
+      $receta = new \App\Models\Receta_Vale();
+      $id_receta_vale = $receta->postRegistrarRecetaValeNuevoConDiagnostico($id_receta_vale, $request->id_farmacia_receta, $request->id_user, $id_consultorio, $nro_receta, $digitos_adicionales, $dni_beneficiario, $cip_beneficiario, $tipodoc_beneficiario, $nombre_beneficiario, $paterno_beneficiario, $materno_beneficiario, $tipo_beneficiario, $dni_titular, $tipdoc_titular, $nombre_titular, $paterno_titular, $materno_titular, $request->fecha_expedicion, $fecha_atencion, $request->nro_historia, $grado, $id_medico, $id_anestesiologo, $id_tiporeceta, $turno, $obs_registro, $id_receta_vale_bus, $id_admision, $tipo_via, $sub_via, $final_via, $nro_guia, $interconsulta, $interconsulta_dias, $id_prestacion, $id_tipo_num, $estado_receta, $p_producto, $p_diagnostico, $sexo, $fecha_nacimiento, $codigo_upss);
+  
+    else :
+      $id_receta_vale = 1;
+    endif;
+
+    if ($id_receta_vale == 0) {
+      Session::flash('flash_message', 'No se pudo registrar la examen adicional, hubo un problema con la conexión de internet de su establecimiento PNP, vuelva a intentarlo nuevamente');
+      return redirect('/listar_citas_medico_paciente');
+    } else {
+      Session::flash('flash_message', 'Prestación exitosa');
+      return redirect('/ver_prestacion_emergencias/' . $request->id_user . '/' . $id_prestacion);
+    }
+  }
+
+  public function ver_modal_emergencia_triaje($id){
+
+      if (!Auth::check()):
+        return redirect('/auth/login');
+      endif;
+
+      $modelEmergencia = new Emergencia();
+      $data = $modelEmergencia->verEmergenciaTriajeById($id);
+      $pendiente_firma = $modelEmergencia->GetDocPendinteFirmarEmergenciaTriajeId($id);
+      
+      $flag_pendinte_firma = (count($pendiente_firma) > 0) ? 1 : 0;
+      
+      //dd($data);
+
+      //--- ESTABLECIMIENTO
+      $id_establecimiento=Auth::user()->id_establecimiento;// id_establecimiento = 76 - 1 mdico  
+      $model_establecimiento = new Establecimiento();
+      $establecimiento=  $model_establecimiento->GetById($id_establecimiento);
+      $nombre_establecimiento = $establecimiento[0]->nombre;
+      //--- -----------
+
+      if($data[0]->talla_cm==null){
+        $data[0]->talla_cm=0;
+      }
+      if($data[0]->peso_kg==null){
+        $data[0]->peso_kg=0;
+      }
+      $talla_cm = $data[0]->talla_cm;
+      $peso_kg = $data[0]->peso_kg;
+      $edadpaciente = $data[0]->edadpaciente;
+      $sexo = $data[0]->sexo;
+
+      if ($talla_cm != "") { 
+          //PESO POR ALTURA
+          $pesoIdeal=50+(($talla_cm-150)/4)*3+($edadpaciente-20)/4;
+          if($sexo=="M") {
+                $pesoIdeal=$pesoIdeal*0.9;
+          }
+          if($pesoIdeal<=0){
+            $pesoIdeal='';
+          }
+      }else{
+         $pesoIdeal = "";
+      }
+
+      if ($peso_kg != "" && $talla_cm != "") { 
+          $talla_en_metros =  $talla_cm*0.01; 
+          $imc= '';
+          if($peso_kg>0 && $talla_cm>0){
+            $imc=   $peso_kg / ($talla_en_metros * $talla_en_metros);
+            $imc=   number_format($imc, 2, '.', '');
+          }
+      } else {
+          $imc = '';
+      }
+  
+      ///PADRE 
+      $padre_paciente = null; 
+      if($data[0]->id_padre_paciente!=null){
+        $padre_paciente = PadrePaciente::find($data[0]->id_padre_paciente); 
+      }
+  
+      ///MADRE 
+      $madre_paciente = null;
+      if($data[0]->id_madre_paciente!=null){
+        $madre_paciente = MadrePaciente::find($data[0]->id_madre_paciente); 
+      } 
+
+     
+      return view('frontend.admision.emergencia.ver_triaje_modal',
+      [ 
+      'data' => $data[0],
+      'imc'=>$imc,  
+      'pesoIdeal'=>$pesoIdeal, 
+      'nombre_establecimiento' => $nombre_establecimiento, 
+      'flag_pendinte_firma' => $flag_pendinte_firma, 
+      'padre_paciente' => $padre_paciente, 
+      'madre_paciente' => $madre_paciente
+      ]);
+
+    }
+
+    public function triaje_ref($tipo_doc,$dni_paciente) {
+
+      if (!Auth::check()):
+          return redirect('/auth/login');
+      endif;
+  
+      //VALIDAMO QUE SEA PRESCRIPTOR MEDICO QUE ES EL TIPO 1
+      if(Auth::user()->tipo_registro == 1 || Auth::user()->tipo_registro == 9){
+  
+      }else{ 
+        Session::flash('flash_message', 'Sólo los médicos pueden registrar triaje');
+        return redirect('/');
+      }
+      //VALIDAMO QUE SEA PRESCRIPTOR MEDICO QUE ES EL TIPO 1
+  
+      $model = new Triaje();
+      $objPrioridades = $model->ShowPrioridad(); //prioridades i ii iii iv
+  
+      $model_beneficiario = new Tipo_beneficiario;
+      $tipo_beneficiario = $model_beneficiario->ShowTipo_beneficiario(); // 1 - 12 / 13 = civil
+      $model_usuario = new User;
+      $user = $model_usuario->GetById(Auth::user()->id);
+      $id_consultorio = $user->id_consultorio;
+  
+      $model_kardex = new Kardexe();
+      $fechaServidor = $model_kardex->getFechaServidor(); 
+  
+      //VALIDAR MEDICO
+      $id_establecimiento=Auth::user()->id_establecimiento;// id_establecimiento = 76 - 1 mdico    
+      $dni=Auth::user()->dni;
+  
+      $model_medico = new Medico();
+      $exite_medico=$model_medico->exite_medico($dni);
+      $exite_medico_ipress=$model_medico->medico_yaregistrado($dni, $id_establecimiento);
+  
+      if($exite_medico==0){
+         Session::flash('flash_message', 'Sólo los médicos pueden registrar triaje');
+        return redirect('/');
+      }else if($exite_medico_ipress==""){
+        $model_establecimiento = new Establecimiento();
+        $establecimiento=  $model_establecimiento->GetById($id_establecimiento);
+        Session::flash('flash_message', 'Usted no es Médico en el establecimiento: '. $establecimiento[0]->nombre);
+        return redirect('/');
+      } else {
+        $model_usuario = new User;
+        $user = $model_usuario->GetById(Auth::user()->id);
+        $id_consultorio = $user->id_consultorio;
+        //--------- 
+        $filtroServicio = 0;
+        $filtroConsultorio = 0;
+        if ($user->flagservicios == 0) {
+          switch($id_consultorio) {
+            case 49: // PEDIATRIA;
+            case 77: // GINECOLOGIA Y OBSTETRICIA
+              $filtroServicio = 1;
+              $filtroConsultorio = $id_consultorio;
+              foreach($objPrioridades as $key => $value) {
+                if ($value->id != 1 && $value->id != 2){
+                  unset($objPrioridades[$key]);
+                }
+              }
+          }
+        }
+        
+        $model_f_ingreso = new Forma_ingreso();
+        $formas_ingreso = $model_f_ingreso->ShowForma_ingreso(); 
+        $model_categoria = new Categoria();
+        $motivo_ingreso = $model_categoria->ShowCategoria(); 
+        $valorFiltrar = 4;
+        $motivo_ingreso_nuevo = array_filter($motivo_ingreso, function($elemento) use ($valorFiltrar) {
+          return $elemento->id === $valorFiltrar;
+        });
+        //---------
+        unset($model_usuario, $user);
+        $date = Carbon::now();
+        $hora = $date->format('H:i:s');
+        $variable_asegurado = DB::table('asegurados')
+        ->select('asegurados.*')
+        ->where('nro_doc_ident',$dni_paciente)
+        ->where('id_estado_reg','1')
+        ->first();
+        $idasegurado = $variable_asegurado->id;
+        $referencia = $variable_asegurado->id_referido; 
+        return view('frontend.admision.emergencia.triaje_ref', [
+          'filtroServicio' => $filtroServicio,       
+          'filtroConsultorio' => $filtroConsultorio, //* consultorio actual - id
+          'prioridades' => $objPrioridades,          //* I II III IV
+          'tipo_beneficiario' => $tipo_beneficiario,  //* 1 - 12 / 13 
+          'formas_ingreso' => $formas_ingreso,
+          'motivo_ingreso' => $motivo_ingreso_nuevo,
+          'hora'=> $hora,
+          'dni_paciente'=>$dni_paciente,
+          'tipo_doc'=>$tipo_doc,
+          'referencia'=>$referencia,
+          'idasegurado'=>$idasegurado
+        ]);
+      }
+    }
+    
+    public function registrar_emergencia_triaje_ref(Request $request) { 
+      if (!Auth::check()):
+          return redirect('/auth/login');
+      endif; 
+    
+      $id_asegurado = "";
+      $objAsegurado = new \App\Models\Paciente;
+     
+      //VALIDA TIPO DOC NULO EN ASEGURADOS
+      $tipoDocNullAse=$objAsegurado->GetAseguradosSoloDNI($request->nro_doc_ident); 
+      if($tipoDocNullAse){
+        if($tipoDocNullAse->id_tipo_doc_ident==null){
+          $objAseguradoEdit = \App\Models\Paciente::find($tipoDocNullAse->id); 
+          if($request->tipo_doc_ident=='DNI'){ 
+            $objAseguradoEdit->id_tipo_doc_ident = '1';  
+            $objAseguradoEdit->save(); 
+          }else if($request->tipo_doc_ident=='CARNET DE EXTRANJERIA' || $request->tipo_doc_ident=='Carnet Extranjeria'){ 
+            $objAseguradoEdit->id_tipo_doc_ident = '2';  
+            $objAseguradoEdit->save(); 
+          }else if($request->tipo_doc_ident=='PASAPORTE' || $request->tipo_doc_ident=='Pasaporte'){ 
+            $objAseguradoEdit->id_tipo_doc_ident = '3';  
+            $objAseguradoEdit->save(); 
+          }else if($request->tipo_doc_ident=='DOCUMENTO DE IDENTIDAD EXTRANJERO' || $request->tipo_doc_ident=='Documento de Identidad extranjero'){ 
+            $objAseguradoEdit->id_tipo_doc_ident = '4';  
+            $objAseguradoEdit->save(); 
+          }
+        }
+      }
+  
+      $existe_datos_asegurado = $objAsegurado->GetAseguradoByDNI($request->nro_doc_ident, $request->id_tipo_doc_ident); 
+      if($existe_datos_asegurado==null){   
+        $id_aseg_paciente=$objAsegurado->GetAseguradosSoloDNI($request->nro_doc_ident); 
+        if($id_aseg_paciente!=null){
+              $objAseguradoEdit = \App\Models\Paciente::find($existe_datos_asegurado->id);  
+              $objAseguradoEdit->codigo_ubig    = $request->codigo_ubig; 
+              $objAseguradoEdit->domicilio    = $request->domicilio;  
+  
+              if($request->id_departamento!=null){
+                $objAseguradoEdit->id_departamento    = $request->id_departamento; 
+              }
+  
+              if($request->id_provincia!=null){
+                $objAseguradoEdit->id_provincia    = $request->id_provincia; 
+              }
+  
+              if($request->id_distrito!=null){
+                $objAseguradoEdit->id_distrito    = $request->id_distrito; 
+              }
+  
+              if($request->nro_doc_ident == $request->nrodoctitular){
+                if($request->cip_titular!=null&&$request->cip_titular!=''){
+                  $objAseguradoEdit->cip = $request->cip_titular;
+                }  
+              }
+  
+              $objAseguradoEdit->nombre  = ($request->nombre);
+              $objAseguradoEdit->paterno = ($request->paterno);
+              $objAseguradoEdit->materno = ($request->materno);
+  
+              if($request->foto_paciente!=null){
+                $objAseguradoEdit->foto    = $request->foto_paciente; 
+              } 
+              $objAseguradoEdit->save();  
+  
+          $id_aseg_pacienteH=$objAsegurado->GetAsegurados_historiaSoloDNI($id_aseg_paciente->id, Auth::user()->id_establecimiento); 
+          if($id_aseg_pacienteH == null){
+            $objAsegurado_Historia = new \App\Models\Asegurado_historia; 
+            $objAsegurado_Historia->id_asegurado = $id_aseg_paciente->id;
+            $objAsegurado_Historia->id_establecimiento = Auth::user()->id_establecimiento;
+            $objAsegurado_Historia->nro_historia = $request->nro_doc_ident;
+            $objAsegurado_Historia->id_estado_reg = 1;
+            $objAsegurado_Historia->created_us = Auth::user()->id; 
+            $objAsegurado_Historia->save();  
+          }
+        } else {
+  
+          $objAsegurado = new \App\Models\Paciente;
+          $objAsegurado->tipo_doc_ident = $request->tipo_doc_ident;
+          $objAsegurado->nro_doc_ident = $request->nro_doc_ident;
+  
+          $objAsegurado->nombre  = ($request->nombre);
+          $objAsegurado->paterno = ($request->paterno);
+          $objAsegurado->materno = ($request->materno);
+  
+          $objAsegurado->sexo = ($request->tipo_registro == '1') ? $request->sexo : $request->selectSexo;
+          $objAsegurado->fecha_nac = ($request->tipo_registro == '1') ? $request->fecha_nac : $request->fecha_nac2;
+          $objAsegurado->id_estado_reg = 1;
+          $objAsegurado->telefono = ''; 
+          $objAsegurado->correo = '';
+          $objAsegurado->created_us = Auth::user()->id; //! ----
+          $objAsegurado->created_at = Carbon::now();
+          $objAsegurado->id_tipo_doc_ident = $request->id_tipo_doc_ident;//! 1 -- siempre le estoy pasando 1 = DNI 
+          if($request->foto_paciente!=null){
+            $objAsegurado->foto    = $request->foto_paciente; 
+          }
+          $objAsegurado->id_tipo_beneficiario = ($request->tipo_beneficiario_saludpol); 
+  
+  
+          if($request->nro_doc_ident == $request->nrodoctitular){
+            if($request->cip_titular!=null&&$request->cip_titular!=''){
+              $objAsegurado->cip = $request->cip_titular;
+            }  
+          } 
+  
+          if($request->id_departamento!=null){
+            $objAsegurado->id_departamento    = $request->id_departamento; 
+          }
+  
+          if($request->id_provincia!=null){
+            $objAsegurado->id_provincia    = $request->id_provincia; 
+          }
+  
+          if($request->id_distrito!=null){
+            $objAsegurado->id_distrito    = $request->id_distrito; 
+          }
+          $objAsegurado->codigo_ubig    = $request->codigo_ubig; 
+          $objAsegurado->domicilio    = $request->domicilio;   
+  
+          $objAsegurado->save();
+  
+          $id_asegurado = $objAsegurado->id;
+  
+          $objAseguradoHistoria = new \App\Models\Asegurado_historia;
+          $objAseguradoHistoria->id_asegurado = $id_asegurado;
+          $objAseguradoHistoria->id_establecimiento = Auth::user()->id_establecimiento;
+          $objAseguradoHistoria->nro_historia = $request->nro_doc_ident;
+          $objAseguradoHistoria->id_estado_reg = 1;
+          $objAseguradoHistoria->created_us = Auth::user()->id;
+          $objAseguradoHistoria->save();
+  
+        }
+      } else if($existe_datos_asegurado != null){   
+        $objAseguradoEdit = \App\Models\Paciente::find($existe_datos_asegurado->id);   
+        $objAseguradoEdit->codigo_ubig    = $request->codigo_ubig; 
+        $objAseguradoEdit->domicilio    = $request->domicilio; 
+        if($request->foto_paciente!=null){
+          $objAseguradoEdit->foto    = $request->foto_paciente; 
+        }
+  
+        if($request->id_departamento!=null){
+          $objAseguradoEdit->id_departamento    = $request->id_departamento; 
+        }
+  
+        if($request->id_provincia!=null){
+          $objAseguradoEdit->id_provincia    = $request->id_provincia; 
+        }
+  
+        if($request->id_distrito!=null){
+          $objAseguradoEdit->id_distrito    = $request->id_distrito; 
+        } 
+  
+        if($request->nro_doc_ident == $request->nrodoctitular){
+          if($request->cip_titular!=null&&$request->cip_titular!=''){
+            $objAseguradoEdit->cip = $request->cip_titular;
+          }  
+        } 
+  
+        $objAseguradoEdit->id_tipo_beneficiario = ($request->tipo_beneficiario_saludpol);  
+  
+        $objAseguradoEdit->nombre  = ($request->nombre);
+        $objAseguradoEdit->paterno = ($request->paterno);
+        $objAseguradoEdit->materno = ($request->materno);
+  
+        $objAseguradoEdit->save();  
+  
+        $id_asegurado = $existe_datos_asegurado->id;
+        $existe_datos_asegurado->updated_at = Carbon::now();
+      } 
+  
+  
+        ///DATOS DE SITUACION Y GRADO DE TITULAR 
+      if($request->nrodoctitular!=null){
+          $objBusTitu=$objAsegurado->GetAseguradosSoloDNI($request->nrodoctitular);  
+          if($objBusTitu){
+            $objAseguradoEditTitular = \App\Models\Paciente::find($objBusTitu->id);
+            if($request->grado_titular!=null&&$request->grado_titular!=''){
+              $objAseguradoEditTitular->grado = $request->grado_titular;
+            }
+            if($request->situaciontitular!=null&&$request->situaciontitular!=''){
+              $objAseguradoEditTitular->situacion_paciente = $request->situaciontitular;
+            }  
+            if($request->unidad_pnptitular!=null&&$request->unidad_pnptitular!=''){
+              $objAseguradoEditTitular->unidad_pnptitular = $request->unidad_pnptitular;
+            }  
+  
+            if($request->nro_doc_ident == $request->nrodoctitular){
+              if($request->cip_titular!=null&&$request->cip_titular!=''){
+                $objAseguradoEditTitular->cip = $request->cip_titular;
+              }  
+            } 
+  
+            $objAseguradoEditTitular->save();
+  
+            ///actualizamos la relacion a paciente asignando id del titular 
+            $objAseguradoEdit = \App\Models\Paciente::find($id_asegurado); 
+            $objAseguradoEdit->id_asegurado_titular    = $objBusTitu->id;  
+            if($request->situacionpaciente!=null&&$request->situacionpaciente!=''){
+              $objAseguradoEdit->situacion_paciente = $request->situacionpaciente;
+            }  
+            $objAseguradoEdit->save();  
+          }else{
+            ///SI EL TITULAR NO EXISTE EN SIGESAPOL
+            $objAseguradoEditTitular=null; 
+            $id_asegurado_titular=null;
+  
+              if($request->nrodoctitular!=null){ 
+  
+                if($request->dni_beneficiario == $request->nrodoctitular ){
+                  $objAseguradoEdit = \App\Models\Paciente::find($id_asegurado);  
+                  $objAseguradoEdit->id_asegurado_titular=$id_asegurado;
+                  $objAseguradoEdit->save(); 
+  
+                }else{ 
+  
+                    $WsReniec = new \App\Ws\Reniec;
+                    $personal_reniec = $WsReniec->BuscarDNI($request->nrodoctitular);
+                    $personal = json_decode($personal_reniec, true);
+  
+                    if($personal){
+                      $model_paciente = new \App\Models\Paciente(); 
+                      $model_paciente->tipo_doc_ident = "DNI";
+                      $model_paciente->nro_doc_ident = $request->nrodoctitular; 
+  
+                      $model_paciente->nombre = $personal['nombres'];
+                      $model_paciente->paterno = $personal['paterno'];
+                      $model_paciente->materno = $personal['materno'];
+                      $model_paciente->id_estado_reg = "1";
+  
+                      if ($personal['sexo']=='FEMENINO') {
+                        $model_paciente->sexo ='F' ;
+                        $model_paciente->bak_sexo ='F' ;
+                      } else {
+                        $model_paciente->sexo ='M' ;
+                        $model_paciente->bak_sexo ='M' ;
+                      }
+  
+                      $model_paciente->fecha_nac = $personal['fecha_nac'];
+                      $model_paciente->observacion = "Registrado desde RENIEC";
+                      $model_paciente->created_us =  Auth::user()->id;
+                      $model_paciente->domicilio = $personal['direccionDomicilio'];
+                      $model_paciente->id_tipo_doc_ident = "1";
+                      $model_paciente->bak_fecha_nac = $personal['fecha_nac'];
+                      $model_paciente->save();
+  
+                      $id_asegurado_titular=$model_paciente->id;
+  
+                      $objAseguradoEdit = \App\Models\Paciente::find($id_asegurado);  
+                      $objAseguradoEdit->id_asegurado_titular=$id_asegurado_titular;
+                      $objAseguradoEdit->save(); 
+  
+  
+                      $updatetitular = \App\Models\Paciente::where('id', '=', $id_asegurado_titular)->first();
+                      $updatetitular->id_asegurado_titular    = $id_asegurado_titular;  
+  
+                      if($request->cip_titular!=null&&$request->cip_titular!=''){
+                        $updatetitular->cip = $request->cip_titular;
+                      }  
+                      if($request->grado_titular!=null&&$request->grado_titular!=''){
+                        $updatetitular->grado = $request->grado_titular;
+                      }
+  
+                      $updatetitular->save(); 
+                    }
+                }
+  
+              } 
+  
+          }
+      }  
+        ///DATOS DE SITUACION Y GRADO DE TITULAR
+  
+      $objTriaje = new Emergencia();
+      $id_medico_triaje = Auth::user()->id;
+      $model_farma = new Farmacia;
+  
+      $farma = $model_farma->GetFarmaByIdfarma($request->id_farmacia);
+      $id_establecimiento = $farma->id_establecimiento;
+      //$nro_emergencia = $objTriaje->getNroEmergencia($id_establecimiento);
+  
+      //-- REGISTRAR EMERGENCIA --
+  
+      $temperatura                = ($request->temperatura != '')       ? $request->temperatura : 0;
+      $sa02_porcentaje            = ($request->saturacion != '')        ? $request->saturacion : 0;
+      $presion_arterial_x         = $request->presion_arterial_x != ''  ? $request->presion_arterial_x : 0;
+      $presion_arterial_y         = $request->presion_arterial_y != ''  ? $request->presion_arterial_y : 0;
+      $talla_cm                   = ($request->talla != '')             ? $request->talla : 0;
+      $tamano_cintura_cm          = ($request->tamanio_cintura != '')   ? $request->tamanio_cintura : 0;
+      $frecuencia_respiratoria    = ($request->frecuencia_respiratoria != '') ? $request->frecuencia_respiratoria: 0;
+      $peso_kg                    = ($request->peso != '')              ? $request->peso: 0;
+      $frecuencia_cardiaca_fetal  = ($request->frecuencia_cardiaca_fetal != '') ? $request->frecuencia_cardiaca_fetal : 0;
+      $frecuencia_cardiaca        = ($request->frec_cardiaca != '')     ? $request->frec_cardiaca : 0;
+      $fi02                       = ($request->oxigenacion != '')       ? $request->oxigenacion : 0;
+      //$observacion_triaje         = ($request->observacion != '')       ? $request->observacion : $request->motivo_consulta_externo;
+      $observacion_triaje         = $request->observacionSeleccionado;
+  
+      $id_padre_paciente = null;
+      $id_madre_paciente = null;
+      $id_forma_ingreso = $request->id_forma_ingreso ;
+  
+      $id_estado_ingreso = $request->id_estado_ingreso ;
+      $id_motivo_ingreso = $request->id_motivo_ingreso ;
+      $es_gestante = $request->es_gestante ;
+  
+      /*  
+        //! ESTADO 2 = ATENTIDO x ADMISION ---- BRYAN 
+        //* ESTADO 1 = PENDIENTE -  APTO ADMISION
+        //? ESTADO 3 = REBOTA 
+      */
+  
+      $estado = null;
+      $id_topico_generado = null;
+  
+      //! ESTADO 2 = ATENTIDO x ADMISION ---- BRYAN 
+      //* ESTADO 1 = PENDIENTE -  APTO ADMISION
+      //? ESTADO 3 = REBOTO
+  
+      if ($request->id_prioridad == "4") {
+        $estado = 1; 
+        $id_topico_generado = $request->topicoSeleccionado;
+      } else { //! prioridad 1 2 3 
+        $estado = 1; 
+        $id_topico_generado = $request->topicoSeleccionado; //! topico seleccionado
+      }
+  
+      $date = Carbon::now();
+      $fechaActual = $date->format('d-m-Y');
+      $horaActual = $date->format('H:i:s');
+  
+      $fecha_registro_ingreso = $date;
+      /*
+      if($request->fecha_registro_ingreso==''||$request->fecha_registro_ingreso==null){
+        $fecha_registro_ingreso = $date;
+      }else{ 
+        $fecha_registro_ingreso = $request->fecha_registro_ingreso ;
+      } 
+      */
+      if($request->hora_registro_ingreso==''||$request->hora_registro_ingreso==null){
+        $hora_registro_ingreso = $horaActual;
+      }else{ 
+        $hora_registro_ingreso = $request->hora_registro_ingreso ;
+      }  
+      $registro_manual = $request->registro_manual ;
+  
+      // insert - function
+      $p_id = $objTriaje->InsertTriaje(
+        $request->nro_doc_ident, 
+        $request->id_prioridad, 
+        $id_asegurado, 
+        $id_topico_generado, 
+        $id_medico_triaje, 
+        $temperatura, 
+        $sa02_porcentaje, 
+        $presion_arterial_x, 
+        $presion_arterial_y, 
+        $talla_cm, 
+        $tamano_cintura_cm, 
+        $frecuencia_respiratoria, 
+        $peso_kg, 
+        $frecuencia_cardiaca_fetal, 
+        $frecuencia_cardiaca, 
+        $fi02, 
+        $id_establecimiento, 
+        $observacion_triaje,       
+        $id_padre_paciente, 
+        $id_madre_paciente,
+        $estado , 
+        $id_forma_ingreso, 
+        $id_estado_ingreso, 
+        $id_motivo_ingreso, 
+        $fecha_registro_ingreso, 
+        $hora_registro_ingreso,
+        $registro_manual,
+        $es_gestante
+      ); 
+  
+      //$valor_generar_id_ext_e=$objTriaje->generar_id_ext_e($p_id[0]->sp_emergencias_triaje_insert3); 
+      $model_add_emergencia = Emergencia::where('id', '=', $p_id[0]->sp_emergencias_triaje_insert3)->first();
+    
+      $model_add_emergencia->id_referencia = $request->referencia;
+      $model_referencia = \App\Models\Referencia::find($request->referencia);
+      $model_actuliza_estado = new \App\Models\Actualizacion_estado;
+      $model_actuliza_estado->estado_antiguo =  $model_referencia->estado_proceso;
+      $model_actuliza_estado->estado_nuevo = 5;
+      $model_actuliza_estado->id_referencia = $request->id_referencia;
+      $model_actuliza_estado->motivo_actualizacion = "Ha pasado por triaje de emergenci";
+      $model_actuliza_estado->created_us = Auth::user()->id;
+      $model_actuliza_estado->flag_estado_reg = 1;
+      $model_actuliza_estado->save();
+  
+      $model_referencia->estado_proceso = 5;
+      $model_referencia->id_cita_triaje_referencia = $model_add_emergencia->id;
+      $model_referencia->save();
+      $model_add_emergencia->tipo_registro = $request->tipo_registro; 
+      $model_add_emergencia->no_amerita = $request->no_amerita; 
+      $model_add_emergencia->id_tipo_beneficiario = ($request->tipo_beneficiario_saludpol); 
+  
+      if($request->documento_titular!=null && $request->documento_titular != ''){
+        $model_add_emergencia->dni_titular =  $request->documento_titular; 
+      }
+  
+  
+      if($request->id_tipo_parentesco!=null){
+        $model_add_emergencia->id_tipo_parentesco = $request->id_tipo_parentesco;
+      }else{
+        $model_add_emergencia->id_tipo_parentesco = 8;
+      }  
+  
+  
+      if($request->flag_triaje!=null){ 
+  
+        $ticket_pendienteUp=\App\Models\Ticket::where('id', '=', $request->flag_triaje)->first();  
+        $model_add_emergencia->totem_at = $ticket_pendienteUp->created_at;
+        $model_add_emergencia->cod_totem = $ticket_pendienteUp->letra.''.$ticket_pendienteUp->numero;
+        $model_add_emergencia->a_llamado_at = $ticket_pendienteUp->a_llamado_at;
+        $model_add_emergencia->a_llamado_us = $ticket_pendienteUp->a_llamado_us;
+        $model_add_emergencia->id_ticket =$request->flag_triaje;
+  
+        $ticket_pendienteUp->atendido_at = Carbon::now();
+        $ticket_pendienteUp->atendido_us = Auth::user()->id;
+        $ticket_pendienteUp->llamado_at = null;
+        $ticket_pendienteUp->llamado_us = null;
+        $ticket_pendienteUp->anulado_at = null;
+        $ticket_pendienteUp->anulado_us = null;
+        $ticket_pendienteUp->seleccionado_at = null;
+        $ticket_pendienteUp->seleccionado_us = null; 
+        $ticket_pendienteUp->id_estado_tv = 3;
+        $ticket_pendienteUp->estado_llamada = 1;  
+  
+        if($ticket_pendienteUp!=null){
+          $model_add_emergencia->totem_at = $ticket_pendienteUp->created_at;
+          $model_add_emergencia->cod_totem = $ticket_pendienteUp->letra.''.$ticket_pendienteUp->numero;
+          $model_add_emergencia->a_llamado_at = $ticket_pendienteUp->a_llamado_at;
+          $model_add_emergencia->a_llamado_us = $ticket_pendienteUp->a_llamado_us;
+          $ticket_pendienteUp->flag_triaje=1;
+  
+          //update tickets donde el codigo de emregncia se aigual al del ticket 
+          $objTriaje = new Emergencia();
+          $objTriaje->update_ticket_by_emergencia_codigo_ticket(($ticket_pendienteUp->letra.''.$ticket_pendienteUp->numero));
+        }
+        $ticket_pendienteUp->save(); 
+  
+        $ticket_pendiente=\App\Models\Ticket::where('id', '=', $request->flag_triaje)->first();  
+        if($ticket_pendiente->flag_triaje==0){
+          $ticket_pendiente->flag_triaje=1;
+  
+          $ticket_pendiente->atendido_at = Carbon::now();
+          $ticket_pendiente->atendido_us = Auth::user()->id;
+          $ticket_pendiente->llamado_at = null;
+          $ticket_pendiente->llamado_us = null;
+          $ticket_pendiente->anulado_at = null;
+          $ticket_pendiente->anulado_us = null;
+          $ticket_pendiente->seleccionado_at = null;
+          $ticket_pendiente->seleccionado_us = null; 
+          $ticket_pendiente->id_estado_tv = 3;
+          $ticket_pendiente->estado_llamada = 1;  
+  
+          $ticket_pendiente->save(); 
+        }
+      }
+  
+      //-----------------VALIDAMOS SI EL ESTABLECIMIENTO  TIENE USO DE TOTEM-----------------//
+      //-----------------VALIDAMOS SI EL ESTABLECIMIENTO  TIENE USO DE TOTEM-----------------//
+      $model_establecimiento = new Establecimiento;
+      $establecimiento = $model_establecimiento->Get(Auth::user()->id_establecimiento);
+      //-----------------VALIDAMOS SI EL ESTABLECIMIENTO  TIENE USO DE TOTEM-----------------// 
+  
+      if($establecimiento->flag_colas==1){
+        ///solo registrar los que son diferentes de CAR  
+          if ($request->id_prioridad == "1" || $request->id_prioridad == "2" || $request->id_prioridad == "3" || $request->id_prioridad == "4") {
+  
+            $model_f_ingreso = \App\Models\Forma_ingreso::where('id', '=', $request->id_forma_ingreso)->first(); 
+            if ($model_f_ingreso->descripcion != "FALLECIDO") {
+              ///INSERT A LA TABLA DE TICKET COMO ADMISION 
+              $objTicket = new \App\Models\Ticket;
+              $objTicket->id_totem = 6;
+              $objTicket->id_totem_opcion = 6;
+              $objTicket->id_asegurado = $id_asegurado;
+              $objTicket->letra = 'A';
+  
+              $numero=$model_establecimiento->generar_secuencia_numero_ticket(); 
+              if($numero!=null){
+                $objTicket->numero = $numero->count + 1;  
+              }else{
+                $objTicket->numero = $numero + 1;  
+              } 
+              $objTicket->id_cita = 0;
+              $objTicket->created_at = $date;
+              $objTicket->estado = 1;
+              $objTicket->id_estado_tv = 0;
+              $objTicket->estado_llamada = 0;
+              $objTicket->cantidad_llamada = 0;
+  
+              //UBICAMOS EL ID DE SUB CONSULTORIO
+              $v_id_consultorio = $model_establecimiento->buscar_id_consultorio_totem_opciones(6); //SELECT id_consultorio FROM totem_opciones WHERE id = '6';
+              if($v_id_consultorio){
+                //dd($v_id_consultorio); //id_consultorio
+                $v_sub_consultorio_id =  $model_establecimiento->buscar_id_sub_consultorios_opciones(6, $v_id_consultorio->id_consultorio ); 
+                //(SELECT id FROM sub_consultorios WHERE id_establecimiento = (SELECT id_establecimiento FROM totems WHERE id = p_id_totem) AND id_consultorio = v_id_consultorio ORDER BY id LIMIT 1);
+                //dd($v_sub_consultorio_id);
+              }
+  
+              //$objTicket->id_sub_consultorio = '1751';
+              $objTicket->id_sub_consultorio = $v_sub_consultorio_id->id;
+              $objTicket->ticketiniciado = 0;
+              $objTicket->nombres_reniec = $request->paterno.' '.$request->materno.' '.$request->nombre;
+              $objTicket->dni_reniec = $request->nro_doc_ident;
+              $objTicket->flag_triaje = 1; 
+              $objTicket->id_emergencia_a = $model_add_emergencia->id; 
+              $objTicket->flag_admision = 0; 
+              $objTicket->save();
+  
+              $model_add_emergencia->id_ticket_admision = $objTicket->id; 
+            } 
+        }
+      }  
+      //-----------------VALIDAMOS SI EL ESTABLECIMIENTO  TIENE USO DE TOTEM-----------------//
+      //-----------------VALIDAMOS SI EL ESTABLECIMIENTO  TIENE USO DE TOTEM-----------------//
+ 
+      $model_add_emergencia->save(); 
+  
+      // $id_emergencia_triaje = $p_id[0]->sp_emergencias_triaje_insert3;
+      // Session::flash('flash_message', 'Registro exitoso');
+      // return redirect('/ver_datos_triaje/'.$id_emergencia_triaje); 
+      Session::flash('flash_message', 'Registro exitoso');
+      return redirect('/all_referencias/'); 
+    }
+    
+
+    // PARA EL LISTADO DE DATOS DE EMERGENCIA
+    public function emergencia_by_enfermeria_ajax(Request $request)
+	{
+
+		if (!Auth::check()) :
+			return redirect('/auth/login');
+		endif;
+
+		$model_emergencia = new Emergencia();
+
+		$p[] = $request->NumeroPagina; //0
+		$p[] = $request->NumeroRegistros;  //1
+		$p[] = $request->fecha_ini; //2
+		$p[] = $request->fecha_fin;  //3  
+		$p[] = Auth::user()->id_establecimiento;  //4
+		$p[] = $request->busqueda_datos;  //5
+		$p[] = $request->seleccionar_estado;  //6
+		$p[] = $request->id_consultorio;  //7
+		$p[] = $request->id_prioridad; 
+		$p[] = $request->id_topico;
+
+		$data = $model_emergencia->GetAllEmergenciasForEnfermerias($p);
+
+		$iTotalDisplayRecords = isset($data['totalrows']) ? $data['totalrows'] : 0;
+
+		$result["PageStart"] = $request->NumeroPagina;
+		$result["pageSize"] = $request->NumeroRegistros;
+		$result["SearchText"] = "";
+		$result["ShowChildren"] = true;
+		$result["iTotalRecords"] = $iTotalDisplayRecords;
+		$result["iTotalDisplayRecords"] = $iTotalDisplayRecords;
+		$result["aaData"] = $data['data'];
+		//==================== 
+
+		echo json_encode($result);
+	}
+    public function hospitalizacion_by_enfermeria_ajax(Request $request)
+	{
+
+		if (!Auth::check()) :
+			return redirect('/auth/login');
+		endif;
+
+		$model_hospitalizacion = new Hospitalizacione();
+
+    $p[] = Auth::user()->id_establecimiento;
+    $p[] = $request->fecha_ini;
+    $p[] = $request->fecha_fin;
+    $p[] = $request->dni_beneficiario;
+    $p[] = strtoupper($request->nombre_beneficiario);
+    $p[] = 1;
+    $p[] = 0;
+    $p[] = $request->NumeroPagina;
+    $p[] = $request->NumeroRegistros;
+
+		$data = $model_hospitalizacion->listar_hospitalizaciones_admisionadas($p);
+
+		$iTotalDisplayRecords = isset($data['totalrows']) ? $data['totalrows'] : 0;
+
+		$result["PageStart"] = $request->NumeroPagina;
+		$result["pageSize"] = $request->NumeroRegistros;
+		$result["SearchText"] = "";
+		$result["ShowChildren"] = true;
+		$result["iTotalRecords"] = $iTotalDisplayRecords;
+		$result["iTotalDisplayRecords"] = $iTotalDisplayRecords;
+		$result["aaData"] = $data;
+		//==================== 
+
+		echo json_encode($result);
+	}
+
+  public function emergencia_by_enfermeria($id_user = 0) {
+
+    if (!Auth::check()) :
+      return redirect('/auth/login');
+    endif;
+
+    $ruta = Route::getCurrentRoute()->getPath();
+    if (count($ruta = explode("/", $ruta)) > 1);
+    $ruta = $ruta[0];
+    $menu = \App\Models\Menu::getMenuByUsuario(Auth::user()->id, $ruta);
+    $permiso = $menu[0];
+    if ($permiso->lectura == "")
+      return redirect('/inicio')->withFlashSuccess("No tiene Permiso para ingresar a la url ingresada");
+
+    $id_user = Auth::user()->id;
+    $id_user_consultorio = Auth::user()->id_consultorio;
+    $model_farma = new Farmacia();
+    $farmacia = $model_farma->GetFarmaByUser($id_user);
+    $id_farmacia = $farmacia->id;
+    $id_establecimiento = $farmacia->id_establecimiento;
+    $establecimiento = $model_farma->GetIpressByIduser($id_user);
+    $id_tipo_atenciones = 2;
+    
+    //==================== 
+    /* if ($id_user_consultorio != 17) {
+      $model_hospitalizacione = new Hospitalizacione();
+      $hospitalizado = $model_hospitalizacione->GetListaTodosHospitalizado($id_establecimiento);
+    } else {
+        $model_hospitalizacione = new Hospitalizacione();
+      $hospitalizado = $model_hospitalizacione->GetListaTodosHospitalizadoDial($id_establecimiento);
+      } */
+      //====================
+      /*==========SECCION DE UPSS HOSPITALIZACION==========*/
+    $model_upss = new \App\Models\Upss();
+    $upss = $model_upss->ShowUPSS_by_Hospitalizacion();
+    /*==========SECCION DE UPSS HOSPITALIZACION==========*/
+    return view('frontend.emergencia_enfermeria.all_nota_ingresos_emergencia', compact('upss', 'diagnosticos','id_tipo_atenciones','hospitalizado', 'farmacia', 'id_farmacia', 'id_user_consultorio', 'id_user','establecimiento'));
+}
+public function formulario_nota_ingreso_emergencia($id_emergencia)
+  	{
+
+	    if (!Auth::check()) :
+	      return redirect('/auth/login');
+	    endif;
+
+	    $modelfarma = new \App\Models\Farmacia;
+	    $model_receta = new \App\Models\Receta_vale;
+	    $model_establecimiento = new \App\Models\Establecimiento;
+	    $model_emergencia= new  \App\Models\Emergencia;
+	    $model_kardex = new Kardexe();
+	    $model_medicos = new Medico;
+	    $medico = $model_medicos->GetDatosMedicoByDniAndEstablecimiento(Auth::user()->dni,Auth::user()->id_establecimiento );
+	    
+	    //verifico si existe el id en hospitalizacion
+	    $verificar_existe = Emergencia::where('id', $id_emergencia)->where('estado', 2)->first();
+
+      //dd($verificar_existe);
+	    if (is_object($verificar_existe)) :
+
+        $farmacia = $modelfarma->GetFarmaByUser(Auth::user()->id);
+        $fechaServidor = $model_kardex->getFechaServidor();
+        $date = Carbon::now();
+        $fecha_actual = $date->format('d-m-Y');
+  
+  
+        $id_ipress = $farmacia->id_establecimiento;
+        $establecimiento = $model_establecimiento->GetById($id_ipress);
+        //dd($establecimiento);
+        if ($id_ipress == 1) {
+          $nivel = 2;
+        } else {
+          $nivel = $establecimiento[0]->nivel;
+        }
+        $estado = 2;
+			$datos_hospitalizacion = $model_emergencia->GetBusca_Emergencia($id_emergencia, $medico->id, 1);
+			$id_principal = $id_emergencia;
+  
+        return view('frontend.emergencia_enfermeria.formulario_nota_ingresos_emergencia', compact('fechaServidor', 'nivel', 'establecimiento', 'id_principal', 'estado', 'datos_hospitalizacion', 'id_tipo_atencion'));
+      else :
+        return redirect('/dashboard/')->withInput()->withErrors(array('Elemento no encontrado ..!'));
+      endif;
+    }
+    // FUNCION PARA TREAR LA PARTE DE ARRIBA DE CAMAS " ACA NO SE INCLUYE AUN LA PARTE DE HIWSTORIAL DE CAMAS
+    public function rotacion_cama_emergencia( $id_farmacia,$id_emergencia)
+    {
+      if (!Auth::check()) :
+        return redirect('/auth/login');
+      endif;
+
+      // YMC
+      $emergenciaModel = new Emergencia();
+      $camaModel = new Cama();
+      $cuartoModel = new Cuarto();
+      $ConsultorioModel = new Consultorio();
+      $medicoModel = new Medico();
+
+
+      $emergencia = $emergenciaModel->ObtenerEmergenciaParaRotacionCamaById($id_emergencia);
+      if (!isset($emergencia)) {
+        session()->flash('error', "No existe el registro de enfermeria");
+        return redirect('/emergencia_by_enfermeria/')->withInput()->withErrors(array('No existe paciente hospitalizado con ese nro de hospitalizado..!'));
+      }
+      $emergencia->es_titular = isset($emergencia->id_tipo_beneficiario) && intval($emergencia->id_tipo_beneficiario) === 8 ? true : false;
+
+      $medicos = $medicoModel->ShowMedicosByIpress($emergencia->id_establecimiento);
+      $consultorios = $ConsultorioModel->ShowAllConsultoriosSubConsultorio_old($emergencia->id_establecimiento);
+
+      $cuartos = $cuartoModel->ShowallCuartosId_Ipress($emergencia->id_establecimiento);
+
+      $camaAcual = Cama::where("id", "=", $emergencia->cama_id)->first();
+      Log::info([
+        $emergencia->id_establecimiento,
+        'EMERGENCIA',
+        $camaAcual->id_cuarto
+      ]);
+      $camas = null;
+      if (isset($camaAcual)) {
+        $camas = $camaModel->GetCamasByIdEstablecimientoYNombreTipoAtencionYIdCuarto($emergencia->id_establecimiento, 'EMERGENCIA', $camaAcual->id_cuarto);
+      }
+
+      return view('frontend.emergencia_enfermeria.form_rotacion_cama_emergencia', compact('emergencia', 'camas', 'cuartos', 'medicos', 'consultorios'));
+
+  /* 
+      $model_emergencia = new Emergencia();
+      $modelEstablecimiento = new Establecimiento();
+      
+  
+      // ESTADO 3 ES EL ESTADO QUE VIENE DE EMERGENCIA EN ESTE CASO ESTADO 3 INDICA QUE YA HA PASADO POR ATENCION Y EN ATENCION SE LE ASIGNA LA CAMA Y DEMAS DATAS,
+  
+      $emergencia =$model_emergencia->GetBuscaPacienteEmergencia_cama( $id_emergencia,3);
+      //dd($hospitalizado->id_consultorio_emer,$hospitalizado->id_consultorio);
+      //dd($hospitalizado->id_consultorio);
+      //dd ($emergencia);
+      if (count($emergencia) > 0) {
+  
+        $modelFarmacia = new Farmacia();
+        //$modelEstablecimiento = new Establecimiento();
+        $model_consultorio = new Consultorio;
+        $model_medico = new \App\Models\Medico();
+        $model_farmacia_servicio = new \App\Models\Farmacia_servicio();
+        $model_usuario = new User;
+        //-----------------------------------------------        
+        $establecimiento = $modelEstablecimiento->GetById($emergencia->id_establecimiento);
+       // dd($establecimiento);
+        $numero_historia = $emergencia->nro_historia;
+        //dd($numero_historia);
+        //------------------------------------------------------------------
+        //------------------------------------------------------------------
+        $user = Auth::user()->id;
+        
+        $id_ipress = $establecimiento[0]->id;
+        $date = Carbon::now();
+        $fecha = $date->format('d-m-Y');
+        $consultorio = $model_consultorio->ShowConsultorios(Auth::user()->id_farmacia);
+
+        //dd($consultorio);
+        $medico = $model_medico->ShowallById_Ipress($id_ipress);
+       // dd($medico);
+  
+        $nivel = $establecimiento[0]->nivel;
+       // dd($nivel);
+        $tipdoc = "1";
+        $dni  = $emergencia->nro_doc_ident;
+        //dd($dni);
+        if (Auth::user()->id_consultorio != 17) {
+          $model_cama = new \App\Models\Cama;
+          //dd($model_cama);
+          $cama = $model_cama->ShowBuscaCama($emergencia->id_cama,$nivel,$emergencia->id_consultorio,$emergencia->id_consultorio_emer);
+          //dd($hospitalizado->id_cama,$nivel ,$hospitalizado->id_consultorio,$hospitalizado->id_consultorio_emer);
+          $model_cuarto = new \App\Models\Cuarto;
+          //dd($model_cuarto);
+          $pabellon = $model_cuarto->BuscaCuarto($emergencia->id_cuarto,$id_ipress);
+          //dd($pabellon);
+          if ($nivel == 2)
+            $medico = DB::table('medicos')->where('id', $emergencia->id_medico)->get();  
+         // dd($medico);  
+        }
+  
+       // aquI SE PONE WHERENULL PARA FILTRAR LOS DATOS NULLOS DE FECHA EGRESO YA QUE AUN NO EXISTE LA FECHA_EGRESO 
+        // PORQUE EL PACIENTE AUN NO HA SIDO DADO DE ALTA
+        $cantidad_emergencia = DB::table('emergencias')
+          ->select('emergencias.*')
+          ->where('dni_beneficiario', $emergencia->nro_doc_ident)
+          ->whereNull('fecha_alta_medica')
+          ->count();
+          //dd($cantidad_hospitalizados);
+  
+        $model_kardex = new Kardexe();
+        $fechaServidor = $model_kardex->getFechaServidor();
+        //dd($fechaServidor);
+        $model_cama = new \App\Models\Cama;
+        $sala = $model_cama->GetConsultorioByIpressCama($id_ipress, $emergencia->id_cama);
+        ///dd($sala,$emergencia->id_cama);
+               // dd($$sala);
+
+        $id_user_consultorio = Auth::user()->id_consultorio;
+        //dd($id_user_consultorio);
+        
+        if ($cantidad_emergencia != 0) {
+          if ($id_user_consultorio != 17) {
+  
+            return view('frontend.emergencia_enfermeria.form_rotacion_cama_emergencia', compact('fecha_pasada', 'numero_historia', 'beneficiario', 'emergencia', 'establecimiento', 'consultorio', 'diagnostico', 'producto', 'id_farmacia', 'medico', 'cama', 'fecha', 'rango_registro', 'fechaServidor', 'flag_receta_dias', 'nro_atenciones', 'flagresponsablefarmacia', 'flagfiscalizador', 'id_ipress', 'tipo_receta', 'pabellon', 'nivel', 'nro_hospitalizado', 'cie', 'id_emergencia', 'sala', 'id_user_consultorio'));
+          } else {
+            return view('frontend.emergencia_enfermeria.form_rotacion_cama_emergencia', compact('fecha_pasada', 'numero_historia', 'beneficiario', 'emergencia', 'establecimiento', 'consultorio', 'diagnostico', 'producto', 'id_farmacia', 'medico', 'fecha', 'rango_registro', 'fechaServidor', 'flag_receta_dias', 'nro_atenciones', 'flagresponsablefarmacia', 'flagfiscalizador', 'id_ipress', 'tipo_receta', 'nivel', 'nro_hospitalizado', 'cie', 'id_emergencia', 'id_user_consultorio'));
+          }
+        } else {
+          return redirect('/all_hospitalizado_by_farmacia/')->withInput()->withErrors(array('No existe paciente hospitalizado con ese nro de hospitalizado..!'));
+        }
+      } else {
+        return redirect('/all_hospitalizado_by_farmacia/')->withInput()->withErrors(array('No existe paciente hospitalizado con ese nro de hospitalizado..!'));
+      } */
+    }
+
+    public function modal_historial_cama_emergencia($id_emergencia){
+      $model_emergencia = new \App\Models\Emergencia;
+      $rotaciones = $model_emergencia->GetObtenerDatosRotacion($id_emergencia);
+      //dd($rotaciones);
+      return view('frontend.hospitalizacion.modal_historial_camas',compact('rotaciones'));
+  }
+
+// FUNCION PARA TRAER EL HISTORIAL DE CAMAS DE EMERGENCIA 
+
+public function rotacion_cama_emergencia_historial(Request $request)
+  {
+
+    if (!Auth::check()) :
+      return redirect('/auth/login');
+    endif;
+
+    $model_farma = new Farmacia;
+    $farma = $model_farma->GetFarmaByIdfarma($request->id_farmacia);
+    $nro_hospitalizacion = $request->nro_hospitalizado;
+    $id_emergencia = $request->id_emergencia;
+    $model_cuarto = new \App\Models\Cuarto;
+    $model_asignacion = new \App\Models\Asignacion_servicio;
+    $model_cama = new \App\Models\Cama;
+    $emergencia = new \App\Models\Emergencia;
+    $model_usuario = new User;
+    $paciente_emergencia = $emergencia->GetBuscaPacienteEmergencia_cama($id_emergencia,3);
+   // dd($paciente_emergencia);
+
+    $id_emergencia = $request->id_emergencia;
+
+    // Obtener los valores necesarios a través de las uniones
+    
+    
+    //dd($paciente_hospitalizado);
+
+    $user = $model_usuario->GetById($request->id_user);
+    $nombre_registrador = $user->name . ' ' . $user->paterno . ' ' . $user->materno;
+
+    if (count($paciente_emergencia) > 0) {
+
+      $model_consultorio = new \App\Models\Consultorio;
+      //$fecha_ingreso = $request->fecha_atencion;
+      
+      $id_medico                = $request->id_medico != '' ? $request->id_medico : 0;
+      
+      if($request->id_opcion=='1'){
+       	$request->id_cama =$request->id_cama2;
+       }
+
+
+      if ($user->id_consultorio != 17) {
+        $id_cama_anterior = $paciente_emergencia->id_cama;
+
+        $id_cama = $request->id_cama;
+        $completa_datos = $model_cuarto->GetCuartoCamaId($request->id_cama);
+        $id_cuarto = $completa_datos[0]->id_cuarto;
+        $id_piso = $completa_datos[0]->id_piso;
+        $id_pabellon = $completa_datos[0]->id_pabellon;
+        $id_consultorio = $completa_datos[0]->id_consultorio;
+        $nombre_consultorio = $completa_datos[0]->nombre_consultorio;
+        $id_consultorio_hosp = $completa_datos[0]->id_asignacion_servicio;
+
+      } else {
+        if ($request->nivel == 3) {
+          $id_cama = 0;
+          $id_cuarto = 0;
+          $id_piso = 0;
+          $id_pabellon = 0;
+          $id_consultorio_hosp = 0;
+          $id_consultorio = 17;
+          $nombre_consultorio = 'NEFROLOGIA';
+        }
+      }
+	    $id_emergencia = $request->id_emergencia;
+
+    // Obtener los valores necesarios a través de las uniones
+   
+    // Actualizar la tabla emergencias con los valores obtenidos
+   
+    DB::table('emergencias')
+    ->where('id', '=', $id_emergencia)
+    ->update([
+        'cama_estado' => $id_cama
+    ]);
+
+// Registrar la rotación
+$id_rotacion = $model_cama->RegistrarRotacion_emergencia(
+    $request->id_emergencia,
+    $request->dni_beneficiario,
+    $request->id_opcion,
+    $request->fecha_cambio,
+    $id_medico, // Asegúrate de tener esta variable definida
+    $id_pabellon,
+    $id_piso,
+    $id_consultorio_hosp,
+    $nombre_consultorio,
+    $id_cuarto,
+    $id_cama,
+    $id_consultorio,
+    Auth::user()->id,
+    $request->id_establecimiento,
+    $request->documento
+);
+
+
+      //actualiza cama
+       
+      if ($user->id_consultorio != 17) {
+        if ($paciente_emergencia->id_cama != $request->id_cama) {
+          $model_cama->actualizaEstado($request->id_cama, 1);
+          $model_cama->actualizaEstado($paciente_emergencia->id_cama, 0);
+        }
+      }
+
+      Session::flash('flash_message', 'Se han actualizado la cama del paciente');
+      return redirect('/rotacion_cama_emergencia/' . $request->id_farmacia . '/' . $id_emergencia);
+    } else {
+      Session::flash('flash_message', 'No se puede actualizar este registro, hubo un problema con la conexión de internet de su establecimiento PNP, vuelva a intentarlo nuevamente');
+      return redirect('/rotacion_cama_emergencia/' . $request->id_farmacia . '/' . $id_emergencia);
+    }
+  }
+
+  public function updateCodeSiteds(Request $request, $id) {
+    $emergencia = Emergencia::find($id);
+    if (!$emergencia ) {
+      return response()->json(['message' => 'No existe registro de la emergencia'], 404);
+    }
+    $emergencia->cod_siteds_susalud = $request->input('cod_siteds_susalud');
+    $emergencia->updated_at_cod_siteds = Carbon::now();
+    $emergencia->updated_us_cod_siteds = Auth::user()->id;
+    $emergencia->save();
+
+    $prestacion = Prestaciones::where('id_ext', $id)->first();
+    if (isset($prestacion) && isset($prestacion->id_cita)) {
+      $citaUpdate = Cita::find($prestacion->id_cita);
+      $citaUpdate->codigo_siteds = $request->input('cod_siteds_susalud');
+      $citaUpdate->updated_at_cod_siteds = Carbon::now();
+      $citaUpdate->updated_us_cod_siteds = Auth::user()->id;
+      $citaUpdate->save();
+    }
+
+    return response()->json([
+        'emergencia_id' => $id,
+        'message' => 'Código SITEDS actualizado correctamente'
+    ], 200);
+  }
+
+  public function get_tipo_violencia(){
+    
+    if (!Auth::check()):
+      return redirect('/auth/login');
+    endif;
+    $model_violencia = new Violencia;//! TIPO DE VIOLENCIA
+    $violencia = $model_violencia->ShowViolencia();
+    return $violencia;
+  }
+
+  public function obtenerUltimoSitedsGenerado(Request $request)
+  {
+    $emergenciaModel = new Emergencia;
+    $result = $emergenciaModel->obtenetUltimoSitedsGenerado($request->id_emergencia, $request->fecha_egreso);
+
+    return response()->json($result);
+  }
+
+  public function all_emergencia_by_establecimiento_ajax(Request $request)
+  { 
+    $model_emergencia = new Emergencia();
+    $p[] = Auth::user()->id_establecimiento; //0
+    $p[] = $request->fecha_ini; //1
+    $p[] = $request->fecha_fin; //2
+    $p[] = $request->ndocumento; //3
+    $p[] = $request->id_servicio_destino; //4
+    $p[] = $request->busqueda_datos; //5
+    $p[] = $request->estado; //'0,2,3'  5 seleccionar_estado
+    $p[] = $request->NumeroPagina; //6
+    $p[] = $request->NumeroRegistros; //7  
+    //$p[] = 'atencion'; //8 modulo de donde viene
+    if ($request->estado == 1)
+      $data = $model_emergencia->GetListaEmergenciasAtencionPendiente($p);
+    else
+      $data = $model_emergencia->GetListaTodosEmergencias2($p);
+      $iTotalDisplayRecords = isset($data[0]->totalrows) ? $data[0]->totalrows : 0;
+
+    $result["PageStart"] = $request->NumeroPagina;
+    $result["pageSize"] = $request->NumeroRegistros;
+    $result["SearchText"] = "";
+    $result["ShowChildren"] = true;
+    $result["iTotalRecords"] = $iTotalDisplayRecords;
+    $result["iTotalDisplayRecords"] = $iTotalDisplayRecords;
+    $result["aaData"] = $data;
+
+    echo json_encode($result);
+    
+  }
+}

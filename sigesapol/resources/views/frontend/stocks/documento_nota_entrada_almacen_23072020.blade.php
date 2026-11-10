@@ -1,0 +1,677 @@
+@extends('frontend.layouts.master')
+@section('renderjs')
+{!! HTML::script("plugins/jQuery/jquery-ui.js") !!}
+{!! HTML::script("plugins/jQuery/jquery-ui.css") !!}
+<script>
+    
+    function justNumbers(e)
+    {
+        var keynum = window.event ? window.event.keyCode : e.which;
+        if ((keynum == 8) || (keynum == 46) || (keynum == 45))
+            return true;
+        return /\d/.test(String.fromCharCode(keynum));
+    }
+
+    function getCargaCampos(valor){
+
+        var concepto  = $('#concepto').val();
+
+
+        if(concepto==1){
+            $('#nota_entrada_nro_guia').attr('readonly', false); 
+            $('#nota_entrada_nro_guia').val(''); 
+            getSiaf();
+            getNro();
+            getTotalNro();
+            getNroContrato();
+            getRB();
+            getProceso();            
+            getNroProceso();            
+            getCG();
+            getProveedor();            
+            $id_proveedor = $("#frm_transferencia").find("#id_proveedor");
+            $id_proveedor.select2();
+            $('#id_proveedor').attr('required', true); 
+            $('#f_r').attr('required', true); 
+            $('#tipo_proceso').attr('required', true); 
+            $('#nro_exp_siaf').attr('required', true); 
+            $('#nro_entrega').attr('required', true); 
+            $('#total_entrega').attr('required', true); 
+            $('#c_g').attr('required', true); 
+            $('#nota_entrada_nro_guia').attr('required', true); 
+            
+        }else
+        { 
+                //ELIMINAR
+                
+                $('#proveedor_label').remove();
+                $('#id_proveedor').select2('destroy');
+                $('#id_proveedor').remove();
+                $('#siaf_label').remove();
+                $('#nro_contrato').remove();
+                $('#contrato_label').remove();
+                $('#nro_exp_siaf').remove();
+                $('#nro_label').remove();    
+                $('#nro_entrega').select2('destroy');
+                $('#nro_entrega').remove();
+                $('#total_label').remove();
+                $('#total_entrega').select2('destroy');                
+                $('#total_entrega').remove();
+                $('#fecha_destino_label').remove();
+                $('#fecha_destino').remove();
+                $('#rb_label').remove();
+                $('#f_r').select2('destroy');
+                $('#f_r').remove();
+                $('#cg_label').remove();
+                $('#c_g').select2('destroy');
+                $('#c_g').remove();
+                $('#tipo_proceso_label').remove();
+                $('#tipo_proceso').select2('destroy');
+                $('#tipo_proceso').remove();
+                $('#nro_proceso').remove();
+                $('#nro_proceso_label').remove();
+                
+                if(concepto==7){    
+                    $('#nota_entrada_nro_guia').attr('readonly', false); 
+                    $('#nota_entrada_nro_guia').val(''); 
+                }
+                else{
+                    getnronotaautomatico();
+                    $('#nota_entrada_nro_guia').attr('readonly', true);     
+                    $('#nota_entrada_nro_guia').val(valor);
+                }
+            
+        }
+    }
+
+    function getnronotaautomatico() {
+        id_farmacia=<?php echo Auth::user()->id_farmacia; ?>,
+        $.ajax({
+            url: '/cargarnronota/'+ id_farmacia,
+            dataType: "text",
+            success : function (data) {
+                //$(".text").html(data);
+                $('#nota_entrada_nro_guia').val(data); 
+            }
+        });    
+    }
+
+    function getSiaf(){
+        var label = document.createElement("label"); 
+        var text = document.createTextNode("Nro Exp. SIAF"); 
+          
+          label.setAttribute("name", "siaf_label");
+          label.setAttribute("id", "siaf_label");
+          label.appendChild(text);
+        $('#cargasiaf').append(label);
+
+        var text = document.createElement("input");
+           text.setAttribute("onkeypress", "return soloNumeros(event)");
+           text.setAttribute("id", "nro_exp_siaf");    
+           text.setAttribute("name", "nro_exp_siaf");
+           text.setAttribute("tabindex", "5");         
+           text.setAttribute("maxlength", "10");      
+           text.setAttribute("required", "required");
+           text.setAttribute("class", "form-control");
+           text.setAttribute("type", "text");          
+                          
+        $('#cargasiaf').append(text);
+        
+    }
+
+    function getNroContrato(){
+        var label = document.createElement("label"); 
+        var text = document.createTextNode("Nro Contrato"); 
+          
+          label.setAttribute("name", "contrato_label");
+          label.setAttribute("id", "contrato_label");
+          label.appendChild(text);
+        $('#carganrocontrato').append(label);
+
+        var text = document.createElement("input");           
+           text.setAttribute("id", "nro_contrato");    
+           text.setAttribute("name", "nro_contrato");
+           text.setAttribute("tabindex", "6");         
+           text.setAttribute("maxlength", "10");      
+           text.setAttribute("required", "required");
+           text.setAttribute("class", "form-control");
+           text.setAttribute("type", "text");          
+                          
+        $('#carganrocontrato').append(text);
+        
+    }
+
+    function getNro(){
+        var label = document.createElement("label"); 
+        var text = document.createTextNode("Nro Entrega");           
+        label.setAttribute("name", "nro_label");
+        label.setAttribute("id", "nro_label");
+        label.appendChild(text);
+        $('#carganro').append(label);
+
+        var select = document.createElement("select");
+        select.setAttribute("name", "nro_entrega");
+        select.setAttribute("class", "form-control select2");
+        select.setAttribute("id", "nro_entrega");        
+        select.setAttribute("required", "required");   
+        select.setAttribute("tabindex", "8");           
+        select.style.width = "100%";            
+        $('#carganro').append(select);
+
+        var newOption = "";
+        newOption = "<option value=''>--Seleccionar--</option>";  
+        newOption += "<option value='1' selected>1</option>";  
+        newOption += "<option value='2' >2</option>";  
+        newOption += "<option value='3' >3</option>";  
+        newOption += "<option value='4' >4</option>";  
+        newOption += "<option value='5' >5</option>";  
+        newOption += "<option value='6' >6</option>";  
+        newOption += "<option value='7' >7</option>";  
+        newOption += "<option value='8' >8</option>";  
+        newOption += "<option value='9' >9</option>";  
+        newOption += "<option value='10' >10</option>";  
+        newOption += "<option value='11' >11</option>";  
+        newOption += "<option value='12' >12</option>";  
+        $('#nro_entrega').html(newOption);
+
+        $nro_entrega = $("#frm_transferencia").find("#nro_entrega");
+        $nro_entrega.select2();        
+    }
+    
+    function getTotalNro(){
+        var label = document.createElement("label"); 
+        var text = document.createTextNode("Total Entrega"); 
+          
+        label.setAttribute("name", "total_label");
+        label.setAttribute("id", "total_label");
+        label.appendChild(text);
+        $('#cargatotal').append(label);
+
+        var select = document.createElement("select");
+        select.setAttribute("name", "total_entrega");
+        select.setAttribute("class", "form-control select2");
+        select.setAttribute("id", "total_entrega");        
+        select.setAttribute("required", "required");   
+        select.setAttribute("tabindex", "9");                   
+        select.style.width = "100%";            
+        $('#cargatotal').append(select);
+
+        var newOption = "";
+        newOption = "<option value=''>--Seleccionar--</option>";  
+        newOption += "<option value='1' selected>1</option>";  
+        newOption += "<option value='2' >2</option>";  
+        newOption += "<option value='3' >3</option>";  
+        newOption += "<option value='4' >4</option>";  
+        newOption += "<option value='5' >5</option>";  
+        newOption += "<option value='6' >6</option>";  
+        newOption += "<option value='7' >7</option>";  
+        newOption += "<option value='8' >8</option>";  
+        newOption += "<option value='9' >9</option>";  
+        newOption += "<option value='10' >10</option>";  
+        newOption += "<option value='11' >11</option>";  
+        newOption += "<option value='12' >12</option>";  
+        $('#total_entrega').html(newOption);
+        $total_entrega = $("#frm_transferencia").find("#total_entrega");
+        $total_entrega.select2();
+    }
+
+    
+    
+    function getProveedor(){
+
+        var label = document.createElement("label"); 
+        var text = document.createTextNode("Proveedor"); 
+        label.setAttribute("name", "proveedor_label");
+        label.setAttribute("id", "proveedor_label");
+        label.appendChild(text);        
+        $('#cargaproveedor').append(label);
+
+        var select = document.createElement("select");
+        select.setAttribute("name", "id_proveedor");
+        select.setAttribute("class", "form-control select2");
+        select.setAttribute("id", "id_proveedor"); 
+        select.setAttribute("required", "required");   
+        select.setAttribute("tabindex", "6");           
+        select.style.width = "100%";            
+        $('#cargaproveedor').append(select);
+
+
+        $.ajax({
+            url: '/cargaproveedor/',
+            success: function (result) {
+                var newOption = "";
+                newOption = "<option value=''>--Seleccionar--</option>";  
+                $(result).each(function (ii, oo) {
+                    newOption += '<option value="'+oo.id+'">'+oo.ruc_proveedor+ ' - ' +oo.nombre_proveedor+'</option>';
+                });
+                $('#id_proveedor').html(newOption)
+            }
+        });
+    }
+
+        function getFechaDestino(){
+        var label = document.createElement("label"); 
+        var text = document.createTextNode("Fecha Destino"); 
+          
+        label.setAttribute("name", "fecha_destino_label");
+        label.setAttribute("id", "fecha_destino_label");
+        label.appendChild(text);
+        $('#cargafechadestino').append(label);
+
+        var text = document.createElement("input");
+        text.setAttribute("name", "fecha_destino");
+        text.setAttribute("type", "text");
+        text.setAttribute("tabindex", "8");           
+        text.setAttribute("class", "form-control datepicker");
+        text.setAttribute("id", "fecha_destino");        
+            
+        $('#cargafechadestino').append(text);
+        
+    }    
+
+
+    function getProceso(){        
+
+        var label = document.createElement("label"); 
+        var text = document.createTextNode("T/Proceso"); 
+        label.setAttribute("name", "tipo_proceso_label");
+        label.setAttribute("id", "tipo_proceso_label");
+
+        label.appendChild(text);        
+        $('#cargartipoproceso').append(label);
+
+        var select = document.createElement("select");
+        select.setAttribute("name", "tipo_proceso");
+        select.setAttribute("class", "form-control select2");
+        select.setAttribute("id", "tipo_proceso");
+        select.setAttribute("required", "required");   
+        select.setAttribute("tabindex", "10");           
+        select.style.width = "100%";            
+        $('#cargartipoproceso').append(select);
+
+        $.ajax({
+            url: '/cargartipoproceso/',
+            success: function (result) {
+                var newOption = "";
+                newOption = "<option value=''>--Seleccionar--</option>";  
+                $(result).each(function (ii, oo) {
+                    newOption += '<option value="'+oo.id+'">'+oo.abreviatura_tipo_proceso+ ' - ' +oo.descripcion_tipo_proceso+'</option>';
+                });
+                $('#tipo_proceso').html(newOption)
+            }
+        });
+
+        $tipo_proceso = $("#frm_transferencia").find("#tipo_proceso");
+        $tipo_proceso.select2();
+    }
+
+
+    
+    function getNroProceso(){
+        var label = document.createElement("label"); 
+        var text = document.createTextNode("Nro Proceso"); 
+          
+          label.setAttribute("name", "nro_proceso_label");
+          label.setAttribute("id", "nro_proceso_label");
+          label.appendChild(text);
+        $('#carganro_proceso').append(label);
+
+        var text = document.createElement("input");
+           text.setAttribute("name", "nro_proceso");
+           text.setAttribute("class", "form-control");
+           text.setAttribute("type", "text");
+           text.setAttribute("tabindex", "11");           
+           text.setAttribute("id", "nro_proceso");
+        $('#carganro_proceso').append(text);
+    }
+    
+
+    function getRB(){        
+
+        var label = document.createElement("label"); 
+        var text = document.createTextNode("FF/RB"); 
+        label.setAttribute("name", "rb_label");
+        label.setAttribute("id", "rb_label");
+        label.appendChild(text);        
+        $('#cargarrb').append(label);
+
+        var select = document.createElement("select");
+        select.setAttribute("name", "f_r");
+        select.setAttribute("class", "form-control select2");
+        select.setAttribute("id", "f_r");        
+        select.setAttribute("required", "required");   
+        select.setAttribute("tabindex", "12");           
+        select.style.width = "100%";            
+        $('#cargarrb').append(select);
+
+        
+        var newOption = "";
+        newOption = "<option value=''>--Seleccionar--</option>";              
+        newOption += "<option value='1' >00-RO</option>";  
+        newOption += "<option value='2' selected>09-RDR</option>";  
+        $('#f_r').html(newOption);
+
+        $f_r = $("#frm_transferencia").find("#f_r");
+        $f_r.select2();
+
+    }
+
+    
+    function getCG(){        
+
+        var label = document.createElement("label"); 
+        var text = document.createTextNode("C. G."); 
+        label.setAttribute("name", "cg_label");
+          label.setAttribute("id", "cg_label");
+
+        label.appendChild(text);        
+        $('#cargacg').append(label);
+
+        var select = document.createElement("select");
+        select.setAttribute("name", "c_g");
+        select.setAttribute("class", "form-control select2");
+        select.setAttribute("id", "c_g");
+        select.setAttribute("required", "required");   
+        select.setAttribute("tabindex", "13");           
+        select.style.width = "100%";            
+        $('#cargacg').append(select);
+
+        $.ajax({
+            url: '/cargarcg/',
+            success: function (result) {
+                var newOption = "";
+                newOption = "<option value=''>--Seleccionar--</option>";  
+                $(result).each(function (ii, oo) {
+                    newOption += '<option value="'+oo.id+'">'+oo.descripcion_cg+'</option>';
+                });
+                $('#c_g').html(newOption)
+            }
+        });
+
+        $c_g = $("#frm_transferencia").find("#c_g");
+        $c_g.select2();
+
+    }
+    
+    
+    function soloNumeros(e)
+        {
+            var key = window.Event ? e.which : e.keyCode;
+            //alert(key);
+            return ((key >= 48 && key <= 57) || key == 0 || key == 8 )
+        }
+
+    function soloNumeros2(e)
+        {
+            var key = window.Event ? e.which : e.keyCode;
+            //alert(key);
+            return ((key >= 48 && key <= 57) || key == 0 || key == 8 || key == 45 )
+        }
+    
+    $cmbconcepto = $("#frm_transferencia").find("#concepto");
+    $cmbconcepto.select2();
+    $cmbid_id_lugar_origen = $("#frm_transferencia").find("#id_lugar_origen");
+    $cmbid_id_lugar_origen.select2();
+
+        $("#nota_entrada_nro_guia").blur(function (event) {
+            var concepto=$('#concepto').val();
+            if(concepto==1)
+                getCargaDatos();
+        });
+
+        function getCargaDatos() {
+
+            var nro_nota_entrada=$('#nota_entrada_nro_guia').val();
+            var valor;
+            var contar;
+
+            $('.table tbody').html("");
+
+            $.ajax({
+                url: '/buscar_nota_entrada/' + nro_nota_entrada,
+                success: function (result) {
+
+                    if(result.length>0){
+
+                        if(result[0].nro_entrega!=result[0].total_entrega){
+                            valor=parseInt(result[0].nro_exp_siaf);
+                            $('#nro_exp_siaf').val(valor).attr("readonly", true);
+                            $('#nro_contrato').val(result[0].nro_contrato).attr("readonly", true);                            
+                            $('#referencia').val(result[0].referencia).attr("readonly", false);
+                            $('#id_proveedor').val(result[0].proveedor_id).trigger('change.select2');
+                            $('#id_proveedor').prop('disabled', true);
+                            $('#total_entrega').prop('disabled', true);
+                            $('#tipo_proceso').val(result[0].tipo_proceso).trigger('change.select2');
+                            $('#tipo_proceso').prop('disabled', true);
+                            $('#nro_proceso').val(result[0].nro_proceso).attr("readonly", true);
+                            $('#f_r').val(result[0].ff_rb).trigger('change.select2');
+                            $('#f_r').prop('disabled', true);
+                            $('#c_g').val(result[0].c_g).trigger('change.select2');
+                            $('#c_g').prop('disabled', true);
+                            if(result[0].nro_entrega==result[0].total_entrega){
+                                $('#btnReg').prop('disabled', true);
+                                $('#nro_entrega').val(result[0].nro_entrega).trigger('change.select2');
+                            }
+                            else
+                            {
+                                contar=parseInt(result[0].nro_entrega);
+                                $('#btnReg').prop('disabled', false);
+                                $('#nro_entrega').val(contar+1).trigger('change.select2');
+
+                            }
+                            
+                            $('#total_entrega').val(result[0].total_entrega).trigger('change.select2');
+                        }
+                        else
+                        {
+
+                             valor=parseInt(result[0].nro_exp_siaf);
+                            $('#nro_exp_siaf').val(valor).attr("readonly", true);
+                            $('#nro_proceso').val(valor).attr("readonly", true);
+                            $('#referencia').val(result[0].referencia).attr("readonly", true);
+                            $('#nro_contrato').val(result[0].nro_contrato).attr("readonly", true);
+                            $('#id_proveedor').val(result[0].proveedor_id).trigger('change.select2');
+                            $('#id_proveedor').prop('disabled', true);
+                            $('#nro_entrega').prop('disabled', true);
+                            $('#referencia').prop('disabled', true);
+                            $('#total_entrega').prop('disabled', true);
+                            $('#tipo_proceso').val(result[0].tipo_proceso).trigger('change.select2');
+                            $('#tipo_proceso').prop('disabled', true);
+                            $('#nro_proceso').val(result[0].nro_proceso);
+                            $('#f_r').val(result[0].ff_rb).trigger('change.select2');
+                            $('#f_r').prop('disabled', true);
+                            $('#c_g').val(result[0].c_g).trigger('change.select2');
+                            $('#c_g').prop('disabled', true);
+                            if(result[0].nro_entrega==result[0].total_entrega){
+                                $('#btnReg').prop('disabled', true);
+                                $('#nro_entrega').val(result[0].nro_entrega).trigger('change.select2');
+                            }
+                            else
+                            {
+                                contar=parseInt(result[0].nro_entrega);
+                                $('#btnReg').prop('disabled', false);
+                                $('#nro_entrega').val(contar+1).trigger('change.select2');
+
+                            }
+                            
+                            $('#total_entrega').val(result[0].total_entrega).trigger('change.select2');
+
+                        }
+                    }
+                    else
+                    {
+                        
+                        $('#nro_exp_siaf').val("").attr("readonly", false);
+                        $('#nro_contrato').val("").attr("readonly", false);
+                        $('#nro_proceso').val("").attr("readonly", false);
+                        $('#id_proveedor').prop('disabled', false);
+                        $('#total_entrega').prop('disabled', false);
+                        $('#tipo_proceso').prop('disabled', false);
+                        $('#nro_entrega').prop('disabled', false);    
+                        $('#id_proveedor').val(null).trigger('change.select2');
+                        $('#total_entrega').val(null).trigger('change.select2');
+                        $('#tipo_proceso').val(null).trigger('change.select2');
+                        $('#nro_entrega').val(null).trigger('change.select2');
+                        $('#c_g').val(null).trigger('change.select2');
+                        $('#f_r').prop('disabled', false);       
+                        $('#c_g').prop('disabled', false);
+                        $('#referencia').val("").attr("readonly", false);                       
+                    }                
+                }
+            });
+        }
+
+
+
+
+
+        function validar(nro, id_farmacia, tipo){
+            
+            option = {                
+                url: '/evitar_duplicados/' + nro + '/' + tipo +  '/' + id_farmacia, 
+                type: 'GET',
+                async:false,
+                dataType: 'json',
+                data: {}
+            };
+            $.ajax(option).done(function (data) {
+                existe=data; 
+                if(tipo==1){
+                    texto=' de la Nota de entrada ';
+                }else{
+                    texto=' de SIAF ';
+                }
+                
+                if(existe>0){
+                    bootbox.confirm({
+                         message: "Aviso: El numero: " + nro + texto + " se encuentra actualmente registrada. ¿Desea Modificar?.",
+                         className: 'title-dialog',
+                         buttons: {
+                             confirm: {
+                                 label: 'Si',
+                                 className: 'btn-success btn-lg'
+                             },
+                             cancel: {
+                                 label: 'No',
+                                 className: 'btn-danger btn-lg'
+                             }
+                         },
+                         callback: function (result) {
+                             if (result==false) {
+                                 $('#frm_transferencia').find("#nota_entrada_nro_guia").val("");
+                                 $('#nota_entrada_nro_guia').focus();
+                             }
+                         }
+                     });
+                }
+            });     
+        }
+
+        function validateFrm(){
+            nro_entrega=$('#frm_transferencia').find("#nro_entrega").val();
+            total_entrega=$('#frm_transferencia').find("#total_entrega").val();
+
+            if(nro_entrega>total_entrega){
+                return false;
+            }
+        }
+
+
+</script>
+<style>
+    .etiqueta{margin-top: 15px}
+    .panel_medicamentos{border: 1px solid gray; padding-top: 10px}
+</style>
+@endsection
+@section('content')
+<div class="container">
+    <div class="row">
+        <div class="col-md-12">
+            <div class="panel panel-primary">
+                <div class="panel-heading">
+                    <h3 class="panel-title">REGISTRAR NOTA DE ENTRADA</h3>                    
+                    <a href="/all_notas_entradas/{{ Auth::user()->id_farmacia }}" class="btn btn-info pull-right">
+                        <i class="fa fa-list"></i> Listado de Nota Entrada 
+                    </a>
+                </div>
+                <div class="panel-body">
+                    <form id="frm_transferencia" method="POST" action="{{ route('registrar_documento_nota_entrada_almacen')}}">   <input type="hidden" name="_token" value="{{ csrf_token() }}">
+                        <!------- Fila 01--------------------------------------->
+                        <div class="row">                            
+                                <input name="nota_entrada_nro_guia" value="<?php echo $nro_nota_entrada?>" class="form-control" type="hidden">
+                                <input name="id_farmacia" value="{{ $id_farmacia }}" class="form-control" type="hidden"> 
+                                <input name="id_user" value="{{ Auth::user()->id }}" class="form-control" type="hidden"> 
+                                <input name="fecha_hace_treinta_dias" id="fecha_hace_treinta_dias" value="{{ $fecha_hace_treinta_dias }}" class="form-control" type="hidden"> 
+                                <input type="hidden" name="ano_actual" value="<?php echo date("Y") ?>" id="ano_actual" class="form-control">
+                            
+                            <div class="col-md-2 etiqueta">
+                                    <label>FEC. REGISTRO (R)</label>
+                                    <input type="text" class="form-control" value="<?php echo date("d-m-Y", strtotime($fechaServidor)); ?>" name="fecha_registro" id="fecha_registro"  readonly=""/>
+                            </div>
+                            <div class="col-md-4 etiqueta">
+                                <label>Registrador </label>
+                                <input readonly="" name="responsable_origen" value="{{ Auth::user()->paterno }} {{ Auth::user()->materno }}, {{ Auth::user()->name }}" required="" class="form-control" style="text-transform:uppercase;" onkeyup="javascript:this.value=this.value.toUpperCase();">
+                            </div>
+                            <div class="col-md-3 etiqueta">
+                                <label>Concepto</label>
+                                <select class="form-control" required="" tabindex="1" onchange="getCargaCampos('<?php echo $nro_nota_entrada; ?>');" name="concepto" id="concepto">
+                                    <option value="" disabled selected style="color: #888888">- Seleccione Concepto -</option>
+                                    @foreach($concepto as $con)
+                                    <option value="{{$con->id}}">{{$con->descripcion_conceptos}}</option>
+                                    @endforeach
+                                </select>
+                            </div>
+                            <div class="col-md-3 etiqueta">
+                                <label>Lugar Origen</label>
+                                <select name="id_lugar_origen" autofocus  tabindex="2" id="id_lugar_origen" class="form-control" required="">
+                                    <option value="" disabled selected style="color: #888888">Seleccionar uno</option>
+                                    @foreach($dependencia as $dep)
+                                    <option value="{{$dep->id}}">{{$dep->nombre}}</option>
+                                    @endforeach
+                                </select>
+                            </div>
+                        </div>
+                        <!------- Fila 02--------------------------------------->
+                        <div class="row">                            
+                            <div class="col-md-2 etiqueta">
+                                <label>Fecha Origen</label>
+                                <input type="text" tabindex="3" class="form-control datepicker" value="<?php echo date("d-m-Y", strtotime($fechaServidor)); ?>" name="fecha_entrada" id="fecha_entrada"   data-date-end-date="0d" autocomplete="off"/>
+                            </div>
+                            <div class="col-md-2 etiqueta">
+                                <label>Nro Documento</label>
+                                <input  onKeyPress="return soloNumeros2(event)" id="nota_entrada_nro_guia" name="nota_entrada_nro_guia" required="" tabindex="4" class="form-control" type="text" maxlength="7" style="text-transform:uppercase;">
+                            </div>
+                            <div class="col-md-2 etiqueta" id="cargasiaf"></div>
+                            <div class="col-md-6 etiqueta">
+                                <label>Referencia</label>
+                                <input id="referencia" name="referencia" tabindex="5" class="form-control" type="text" style="text-transform:uppercase;">
+                            </div>
+                        </div>
+                        <div class="row">
+                            <div class="col-md-5 etiqueta" id="cargaproveedor"></div>
+                            <div class="col-md-3 etiqueta" id="carganrocontrato"></div>
+                            <div class="col-md-2 etiqueta" id="carganro"></div>
+                            <div class="col-md-2 etiqueta" id="cargatotal"></div>
+                        </div>
+                        <!-------------------------------------------------------------------------------------------->
+                        <div class="row">
+                            <div class="col-md-4 etiqueta" id="cargartipoproceso"></div>
+                            <div class="col-md-4 etiqueta" id="carganro_proceso"></div>
+                            <div class="col-md-2 etiqueta" id="cargarrb"></div>
+                            <div class="col-md-2 etiqueta" id="cargacg"></div>
+                        </div>
+                        <!------------------------------------------------------------------------------->
+
+                        <div class="col-md-4 etiqueta pull-right">
+                            <button tabindex="13"     class="btn btn-success form-control" value="" type="submit" id="btnReg" onclick="validateFrm()">
+                                <i class="fa fa-save"></i> Registrar y continuar
+                            </button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+@include('frontend.includes.footer')
+@endsection

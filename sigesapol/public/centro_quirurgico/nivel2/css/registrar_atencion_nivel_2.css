@@ -1,0 +1,145 @@
+  .panel-heading {
+    text-align: center;
+  }
+
+  .form-row {
+    display: grid;
+    grid-template-columns: 180px 10px 1fr;
+    align-items: center;
+    margin-bottom: 5px;
+  }
+
+  /* 🔹 Fila con dos columnas de datos (como la que tiene dos selects) */
+  .form-row.double {
+    grid-template-columns: 180px 10px 1fr 180px 10px 1fr;
+  }
+
+  /* 🔹 Etiquetas y separadores */
+  .label {
+    font-weight: bold;
+    color: #222;
+    white-space: nowrap;
+    text-align: left;
+  }
+
+  .colon {
+    text-align: right;
+    font-weight: bold;
+    padding-right: 4px;
+    font-size: 11px;
+  }
+
+  /* 🔹 Valor o campo (input, select, texto) */
+  .value {
+    text-align: left;
+    width: 100%;
+    font-size: 11px;
+  }
+
+  label {
+    font-size: 11px;
+  }
+
+  .value-row {
+    font-size: 11px;
+  }
+
+  #faTableCirujano,
+  #faTableAnastesiologo,
+  #faTableEnfermeraIntru,
+  #faTableDiagnosticos,
+  #faTableProcedures {
+    margin-top: 10px;
+  }
+
+  #faTableCirujano th,
+  #faTableCirujano td {
+    text-align: left !important;
+  }
+
+  #faTableAnastesiologo th,
+  #faTableAnastesiologo td {
+    text-align: left !important;
+  }
+
+  #faTableEnfermeraIntru th,
+  #faTableEnfermeraIntru td {
+    text-align: left !important;
+  }
+
+  #faTableDiagnosticos th,
+  #faTableDiagnosticos td {
+    text-align: left !important;
+  }
+
+  #faTableProcedures th,
+  #faTableProcedures td {
+    text-align: left !important;
+  }
+
+  .modal-footer {
+    display: flex;
+    justify-content: center;
+    gap: 15px;
+    padding: 20px 0px;
+    border-top: 1px solid #ddd;
+    background-color: #f9f9f9;
+  }
+
+  .table-error {
+    border: 1px solid #dc3545;
+    background-color: #fee2e2;
+  }
+
+  .label-help {
+    color: #dc3545;
+    font-size: 11px;
+    font-weight: bold
+  }
+
+  .swal2-icon.swal2-warning {
+    font-size: 15px !important;
+  }
+
+  .container-buttons {
+    padding: 30px 250px;
+    border: 1px solid #c4c4c4 !important;
+    border-radius: 5px;
+  }
+
+  .input-readonly {
+    background-color: #E3E3E3 !important;
+    cursor: default;
+  }
+
+  .input-readonly-white {
+    background-color: #ffffff !important;
+    cursor: default;
+  }
+
+  
+
+  /* 🔹 Responsivo: en pantallas pequeñas se apila todo ordenadamente */
+  @media (max-width: 768px) {
+    .form-row {
+      grid-template-columns: 1fr;
+    }
+
+    .form-row.double {
+      grid-template-columns: 1fr;
+    }
+
+    .colon {
+      display: none;
+    }
+  }
+
+.form-group.has-error .form-control {
+  border: 1px solid #d9534f !important;
+}
+
+/* SELECT2: el borde visible está en .select2-selection */
+.form-group.has-error .select2-container .select2-selection,
+.form-group.has-error .select2-container .select2-selection--single {
+  border: 1px solid #d9534f !important;
+}

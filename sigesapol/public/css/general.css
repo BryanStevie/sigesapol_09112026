@@ -1,0 +1,39 @@
+
+.texto-con-puntos {
+  position: relative;
+  cursor: help;
+  color:#1d71b8;
+}
+
+.texto-con-puntos:hover {
+  border-bottom: 1px dotted #000;
+}
+
+/* Alternativa más elaborada con puntos reales */
+.texto-con-puntos:hover::after {
+  content: "...........";
+  position: absolute;
+  left: 0;
+  bottom: -2px;
+  font-size: 10px;
+  letter-spacing: 1px;
+  color: #333;
+  width: 100%;
+  text-align: center;
+  overflow: hidden;
+  height: 10px;
+}
+.texto-negrita-14{
+font-weight: bold; 
+font-size: 14px;
+}
+.texto-12{
+font-size: 12px;
+}
+.texto-padding-l-10{
+  padding-left: 10px;
+}
+.texto-negrita-mayuscula{
+  font-weight: bold; 
+  text-transform: uppercase;
+}

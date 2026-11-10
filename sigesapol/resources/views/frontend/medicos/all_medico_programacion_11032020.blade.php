@@ -1,0 +1,546 @@
+@extends('frontend.layouts.master')
+@section('renderjs')
+<style>
+
+
+    .filterable {
+        margin-top: 0px;
+    }
+    .filterable .panel-heading .pull-right {
+        margin-top: -20px;
+    }
+    .filterable .filters input[disabled] {
+        background-color: transparent;
+        border: none;
+        cursor: auto;
+        box-shadow: none;
+        padding: 0;
+        height: auto;
+    }
+    .filterable .filters input[disabled]::-webkit-input-placeholder {
+        color: #333;
+    }
+    .filterable .filters input[disabled]::-moz-placeholder {
+        color: #333;
+    }
+    .filterable .filters input[disabled]:-ms-input-placeholder {
+        color: #333;
+    }
+    #global {
+        height: 480px !important;
+        width: auto;
+        border: 1px solid #ddd;
+        background: #f1f1f1;
+        overflow-y: scroll !important;
+    }
+</style>
+
+<script src="{{asset('dateTimePicker/bootstrap-datetimepicker.js')}}"></script> 
+<link rel="stylesheet" href="{{asset('css/dateTimePicker/bootstrap-datetimepicker.css')}}">
+
+<script>
+    $(document).ready(function () {
+		
+		$('#id_medico').select2();
+		
+		$('#fecha_atencion_busqueda').datepicker({
+			//viewMode: 'years',
+			//startView: 1,
+  			//minView: 2,
+			format: 'mm/yyyy',
+			viewMode: 'years',
+			minViewMode: "months",
+            language: "es",
+            autoclose: true,
+            weekStart: 0,
+            todayBtn: "linked"
+		});
+		//alert("<?php //echo $mes."/".$ano?>");
+		$('#fecha_atencion_busqueda').val("<?php echo $mes."/".$ano?>");
+		$('#fecha_atencion_busqueda').datepicker('update');
+		
+        $('.filterable .btn-filter').click(function () {
+            var $panel = $(this).parents('.filterable'),
+                    $filters = $panel.find('.filters input'),
+                    $tbody = $panel.find('.table tbody');
+            if ($filters.prop('disabled') == true) {
+                $filters.prop('disabled', false);
+                $filters.first().focus();
+            } else {
+                $filters.val('').prop('disabled', true);
+                $tbody.find('.no-result').remove();
+                $tbody.find('tr').show();
+            }
+        });
+
+        $('.filterable .filters input').keyup(function (e) {
+            /* Ignore tab key */
+            var code = e.keyCode || e.which;
+            if (code == '9')
+                return;
+            /* Useful DOM data and selectors */
+            var $input = $(this),
+                    inputContent = $input.val().toLowerCase(),
+                    $panel = $input.parents('.filterable'),
+                    column = $panel.find('.filters th').index($input.parents('th')),
+                    $table = $panel.find('.table'),
+                    $rows = $table.find('tbody tr');
+            /* Dirtiest filter function ever ;) */
+            var $filteredRows = $rows.filter(function () {
+                var value = $(this).find('td').eq(column).text().toLowerCase();
+                return value.indexOf(inputContent) === -1;
+            });
+            /* Clean previous no-result if exist */
+            $table.find('tbody .no-result').remove();
+            /* Show all rows, hide filtered ones (never do that outside of a demo ! xD) */
+            $rows.show();
+            $filteredRows.hide();
+            /* Prepend no-result row if all rows are filtered */
+            if ($filteredRows.length === $rows.length) {
+                $table.find('tbody').prepend($('<tr class="no-result text-center"><td colspan="' + $table.find('.filters th').length + '">No se encuentra el laboratorio</td></tr>'));
+            }
+        });
+    });
+	
+	
+	function getMedicoProgramacion(){
+		var id_establecimiento = $('#id_establecimiento').val();
+		var id_medico = $('#id_medico').val();
+        var id_consultorio = $('#id_consultorio').val();
+        var id_tipo_atencion = $('#id_tipo_atencion').val();
+		var fecha_atencion = $('#fecha_atencion_busqueda').val().split("/");
+		var mes  = fecha_atencion[0];
+		var ano  = fecha_atencion[1];
+		
+		$('.table tbody').html("");
+		$('#M').prop("checked",false);
+		$('#T').prop("checked",false);
+		$('#N').prop("checked",false);
+		$('#MD').prop("checked",false);
+		$('#marcar').hide();
+		$.ajax({
+                    url: '/all_medicos_programacion_detalle/'+id_establecimiento+'/'+id_medico+'/'+id_consultorio+'/'+mes+'/'+ano+'/'+id_tipo_atencion,
+                    success: function(result){
+                            $('.table tbody').html(result);
+                            $('#marcar').show();
+                    }
+		});
+		
+	}
+	
+	
+	function getPermisoByUsuario(){
+        
+		var id_usuario = $('#id_usuario').val();
+		
+		$('.table tbody').html("");
+		
+		$.ajax({
+			url: '/obtener_permiso_por_idusuario/'+id_usuario,
+			success: function(result){                    
+				var newFila = "";
+				$(result).each(function (ii, oo) {
+					newFila += "<tr>";
+					var parentid=oo.parentid;
+					
+					
+					
+					
+					if(parentid == 0){
+						newFila += "<td style='background:#D9EDF7;color:#31708F'><div class='col-lg-3'><b>"+oo.nombremenu+"</b><input type='hidden' name='idmenu[]' value='"+oo.idmenu+"'></div>";
+						var chk=oo.lectura=='1'?'checked':'';
+						newFila += '<td width="10%" style="background:#D9EDF7" align="center"><input type="checkbox" id="'+oo.idmenu+'_lectura" name="lectura['+oo.idmenu+']" ' + chk + ' value="1" onchange=seleccionGrupo('+oo.idmenu+',this,"lectura")></td>';
+						var chk=oo.crear=='1'?'checked':'';
+						newFila += '<td width="10%" style="background:#D9EDF7" align="center"><input type="checkbox" id="'+oo.idmenu+'_crear" name="crear['+oo.idmenu+']" ' + chk + ' value="1" onchange=seleccionGrupo('+oo.idmenu+',this,"crear")></td>';
+						var chk=oo.modificar=='1'?'checked':'';
+						newFila += '<td width="10%" style="background:#D9EDF7" align="center"><input type="checkbox" id="'+oo.idmenu+'_modificar" name="modificar['+oo.idmenu+']" ' + chk + ' value="1" onchange=seleccionGrupo('+oo.idmenu+',this,"modificar")></td>';
+						var chk=oo.eliminar=='1'?'checked':'';
+						newFila += '<td width="10%" style="background:#D9EDF7" align="center"><input type="checkbox" id="'+oo.idmenu+'_eliminar" name="eliminar['+oo.idmenu+']" ' + chk + ' value="1" onchange=seleccionGrupo('+oo.idmenu+',this,"eliminar")></td>';
+						
+						
+					}
+					else 
+					{
+					newFila += "<td width='60%'>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;"+oo.nombremenu+"<input type='hidden' name='idmenu[]' value='"+oo.idmenu+"'></td>";
+					}
+					
+					if(parentid > 0){
+						var chk=oo.lectura=='1'?'checked':'';
+						newFila += '<td width="10%" align="center"><input type="checkbox" parent='+oo.parentid+' idmenu='+oo.idmenu+' class="'+oo.parentid+'_lectura" id="'+oo.idmenu+'_lectura"  name="lectura['+oo.idmenu+']" ' + chk + ' value="1" onchange=seleccionPadre("'+oo.parentid+'_lectura",this,'+oo.parentid+','+oo.idmenu+')></td>';
+						var chk=oo.crear=='1'?'checked':'';
+						newFila += '<td width="10%" align="center"><input type="checkbox" parent='+oo.parentid+' idmenu='+oo.idmenu+' class="'+oo.parentid+'_crear" id="'+oo.idmenu+'_crear" name="crear['+oo.idmenu+']" ' + chk + ' value="1" onchange=seleccionPadre("'+oo.parentid+'_crear",this,'+oo.parentid+','+oo.idmenu+')></td>';
+						var chk=oo.modificar=='1'?'checked':'';
+						newFila += '<td width="10%" align="center"><input type="checkbox" parent='+oo.parentid+' idmenu='+oo.idmenu+' class="'+oo.parentid+'_modificar" id="'+oo.idmenu+'_modificar" name="modificar['+oo.idmenu+']" ' + chk + ' value="1" onchange=seleccionPadre("'+oo.parentid+'_modificar",this,'+oo.parentid+','+oo.idmenu+')></td>';
+						var chk=oo.eliminar=='1'?'checked':'';
+						newFila += '<td width="10%" align="center"><input type="checkbox" parent='+oo.parentid+' idmenu='+oo.idmenu+' class="'+oo.parentid+'_eliminar" id="'+oo.idmenu+'_eliminar" name="eliminar['+oo.idmenu+']" ' + chk + ' value="1" onchange=seleccionPadre("'+oo.parentid+'_eliminar",this,'+oo.parentid+','+oo.idmenu+')></td>';
+					}else{
+						newFila += '<td colspan=3></td>';
+					}
+					newFila += "</tr>";
+				});                 
+				$('.table tbody').html(newFila);
+				//$("#nro_admision").select2({max_selected_options: 4});
+			
+			}
+		});
+        
+    }	
+	
+	function seleccionGrupo(idmenu,obj,tipo){
+		if($(obj).is(':checked')){
+			$('.'+idmenu+'_'+tipo).prop("checked",true);
+			$('.'+idmenu+'_lectura').prop("checked",true);
+			$('#'+idmenu+'_lectura').prop("checked",true);
+		}else{
+			$('.'+idmenu+'_'+tipo).prop("checked",false);
+		}
+		
+	}
+	
+	function seleccionPadre(clsparentid,obj,parentid,idmenu){
+		
+		var m 	= 0;
+		var c 	= 0;
+		$('input[idmenu='+idmenu+']').each(function(data){
+			if($(this).attr('class') == parentid+'_crear' || $(this).attr('class') == parentid+'_modificar' || $(this).attr('class') == parentid+'_eliminar'){
+				if($(this).is(':checked')){
+					m++;
+				}
+			}
+			
+			if(clsparentid != parentid+'_lectura'){
+				if(m > 0)$('#'+idmenu+'_lectura').prop("checked",true);
+				else $('#'+idmenu+'_lectura').prop("checked",false);
+			}
+		})
+		
+		$('input[parent='+parentid+']').each(function(data){
+			if($(this).is(':checked')){
+				c++;
+			}
+		})
+
+		if(c > 0)$('#'+parentid+'_lectura').prop("checked",true);
+		else $('#'+parentid+'_lectura').prop("checked",false);
+		
+		/**************************/
+		var i = 0;
+		$('.'+clsparentid).each(function(data){
+			if($(this).is(':checked')){
+				i++;
+			}
+		})
+		
+		if(i > 0)$('#'+clsparentid).prop("checked",true);
+		else $('#'+clsparentid).prop("checked",false);
+		
+	}
+	
+	
+	function seleccionPadre_(parentid,obj){
+		
+		var i = 0;
+		$('.'+parentid).each(function(data){
+			if($(this).is(':checked')){
+				i++;
+			}
+		})
+		
+		
+		var m 			= 0;
+		var idparent 	= 0;
+		var idmenu 		= 0;
+		if($(obj).is(':checked')){
+			var clase 	= ($(obj).attr("class")).split("_");
+			var menu 	= ($(obj).attr("id")).split("_");
+			idparent 	= clase[0];
+			opcion 		= clase[1];
+			idmenu		= menu[0];
+			if(opcion == "crear" || opcion == "modificar" || opcion == "eliminar"){
+				m = 0;
+				$('input[parent='+idparent+']').each(function(data){
+					if($(this).is(':checked')){
+						m++;
+					}
+				})
+				
+			}
+		}else{
+			var menu 	= ($(obj).attr("id")).split("_");
+			idmenu		= menu[0];
+		}
+		
+		
+		if(m > 0)$('#'+idmenu+'_lectura').prop("checked",true);
+		
+		if(i > 0)$('#'+parentid).prop("checked",true);
+		else $('#'+parentid).prop("checked",false);
+		
+	}
+	
+	function limpieza(){
+		$('.table tbody').html("");
+	}
+	
+	function getDatosPer(){
+		var id_medico = $('#id_medico').val();
+		limpieza();
+		$('#divMedico').hide();
+		if(id_medico > 0){
+			var dni = $('#id_medico option:selected').attr('dni');
+			var email = $('#id_medico option:selected').attr('email');
+			var colegiatura = $('#id_medico option:selected').attr('colegiatura');
+			$('#divMedico').show();
+			$('#divDni').html(dni);
+			$('#divEmail').html(email);
+			$('#divColegiatura').html(colegiatura);
+                        $('#dni_medico').val(dni);
+                        $('#id_consultorio').prop("disabled", false);
+                        getConsultorio();
+		}
+		
+		 
+	}
+        
+    function getConsultorio() {
+
+        var id_establecimiento = $('#id_establecimiento').val();
+        var id_medico = $('#id_medico').val();
+        var id_tipo_atencion = $('#id_tipo_atencion').val();
+        $.ajax({
+            //url: '/obtener_servicio_por_id_establecimiento_and_id_medico/' + id_establecimiento + '/' + id_medico + '/' + id_tipo_atencion,
+                url: '/obtener_servicio_por_id_establecimiento_and_id_medico/' + id_establecimiento + '/' + id_medico,
+            success: function (result) {
+                var newOption = "";
+                var reg = result.length;
+                if(reg >= 2){
+                    newOption = "<option value='0'>--Seleccionar-</option>";
+                }
+                $(result).each(function (ii, oo) {
+                    newOption += "<option value='" + oo.id_consultorio + "'>" + oo.nom_consultorio + "</option>";
+                });
+                $('#id_consultorio').html(newOption);
+                $("#id_consultorio").select2({max_selected_options: 4});
+
+            }
+        });
+
+    }
+
+        function getDatos(){
+		var id_medico = $('#id_medico').val();
+		limpieza();
+		$('#divMedico').hide();
+		if(id_medico > 0){
+			var consultorio = $('#id_medico option:selected').attr('consultorio');
+			var dni = $('#id_medico option:selected').attr('dni');
+			var email = $('#id_medico option:selected').attr('email');
+			var colegiatura = $('#id_medico option:selected').attr('colegiatura');
+			$('#divMedico').show();
+			$('#divServicio').html(consultorio);
+			$('#divDni').html(dni);
+			$('#divEmail').html(email);
+			$('#divColegiatura').html(colegiatura);
+                        $('#dni_medico').val(dni);
+		}
+		
+		
+	}
+	
+	function seleccionGr(obj,tipo){
+		if($(obj).is(':checked')){
+			//$('.'+tipo).prop("checked",true);
+			$('.'+tipo).each(function(){
+				//alert($(this).attr("disabled"));
+				if($(this).is(':enabled'))$(this).prop("checked",true);
+			});
+			
+			//$('.'+idmenu+'_lectura').prop("checked",true);
+			//$('#'+idmenu+'_lectura').prop("checked",true);
+		}else{
+			$('.'+tipo).prop("checked",false);
+		}
+		
+	}
+	
+    function validateForm() {
+        var msg = "";
+        var sw = true;
+        var id_medico = $('#id_medico').val();
+        var id_consultorio = $('#id_consultorio').val();
+        var cont = $('.table tbody').html();
+                
+        if (id_medico == "") {
+            msg += "Seleccione Personal de Salud.<br/>";
+            sw = false
+        }
+
+        if (id_consultorio == "0") {
+            msg += "Seleccione Servicio.<br/>";
+            sw = false
+        }       
+
+        if (cont == "") {
+            msg += "Realice la búsqueda de Programación de días.<br/>";
+            sw = false
+        }
+        
+        if (sw == false) {
+            bootbox.alert(msg);
+            return sw;
+        } else {
+            submitFrm();
+        }
+        return false;
+    }
+    
+    function submitFrm() {
+        bootbox.confirm({
+            message: "Se registrarán o actualizarán los registros Seleccionados, ¿Está seguro de continuar?",
+            buttons: {
+                confirm: {
+                    label: 'Si',
+                    className: 'btn-success'
+                },
+                cancel: {
+                    label: 'No',
+                    className: 'btn-danger'
+                }
+            },
+            callback: function (result) {
+                if (result == true) {
+                    document.frm.submit();
+                }
+            }
+        });
+    }
+		
+</script>
+@endsection
+@section('content')
+<div class="container">
+    <div class="row">
+        <div class="col-md-10 well col-md-offset-1">
+            <div class="row">
+                <form name="frm" id="frm" class="form-horizontal" role="form" method="post"  action="{{ route('registrar_medico_programacion') }}" onsubmit="return validateForm()">
+                    <input type="hidden" name="_token" value="{{ csrf_token() }}">
+                    <input type="hidden" name="id_establecimiento" id="id_establecimiento" value="<?php echo $id_establecimiento?>"/>
+                    <input type="hidden" name="dni_medico" id="dni_medico" value=""/>
+                    <div class="panel panel-primary filterable">
+                        <div class="panel-heading">
+                            <h3 class="panel-title">Programaci&oacute;n de Personal de Salud</h3>
+                        </div>
+                        <div class="panel-body">
+
+                        <div class="form-group">
+                            <label class="col-lg-2 control-label">Tipo de Atenci&oacute;n</label>
+                            <div class="col-lg-6">
+                                <select class="form-control" id="id_tipo_atencion" name="id_tipo_atencion">
+                                    <option value="">-Seleccionar-</option>
+                                    <option value="AMBULATORIO" selected>AMBULATORIO</option>
+                                    <option value="EMERGENCIA">EMERGENCIA</option>
+                                    <option value="HOSPITALIZACION">HOSPITALIZACION</option>
+                                    <option value="QUIRURGICO">CENTRO QUIRURGICO</option>
+                                </select>
+
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <label class="col-lg-2 control-label">Personal de Salud</label>
+                            <div class="col-lg-6">
+                                <select class="form-control" name="id_medico" id="id_medico" onchange="getDatosPer()" style="width: 100%;">
+                                    <option value="">Seleccionar Personal de Salud</option>
+                                    @foreach($medicos as $med)
+                                    <option dni="<?php echo $med->dni ?>" email="<?php echo $med->email ?>" colegiatura="<?php echo $med->colegiatura ?>" value="{{$med->id}}">{{$med->paterno}} {{$med->materno}}, {{$med->nombre}}</option>
+                                    @endforeach
+                                </select>
+
+                            </div>
+                            <div class="col-lg-2">
+                                    <div class='input-group date' id='datetimepicker10'>
+                                        <input type='text' class="form-control input-sm" id="fecha_atencion_busqueda" />
+                                        <span class="input-group-addon">
+                                            <span class="glyphicon glyphicon-calendar">
+                                            </span>
+                                        </span>
+                                    </div>
+                            </div>
+                            <div class="col-lg-2">
+                                <input class="btn btn-info btn-circle input-sm" id="btnBuscar" value="Buscar" type="button" onclick="getMedicoProgramacion()">
+                            </div>
+                        </div>
+                        <div id="divMedico">
+                            <label class="col-lg-1 controlx-label" style="text-align:right">DNI</label>
+                            <label class="col-lg-2" style="font-weight:normal" id="divDni"></label>
+                            <label class="col-lg-1 controlx-label" style="text-align:right">Email</label>
+                            <label class="col-lg-3" style="font-weight:normal" id="divEmail"></label>
+                            <label class="col-lg-1 controlx-label">Colegiatura</label>
+                            <label class="col-lg-3" style="font-weight:normal" id="divColegiatura"></label>
+                        </div>
+                        <div class="col-sm-12">
+                            <div class="form-group">
+                                <label class="col-sm-3 col-md-2 control-label">Servicio</label>
+                                <div class="col-sm-9 col-md-10">
+                                    <select class="form-control input-sm" name="id_consultorio" id="id_consultorio" required="" disabled="">
+                                        <option value="0">-Seleccionar-</option>
+                                    </select>
+                                </div>
+                            </div>
+                        </div>
+                        <div style="clear:both;height:10px"></div>
+                        <table class="tablex">
+                            <thead>
+                                <tr class="filters">
+                                    <th width="40%">&nbsp;&nbsp;&nbsp;&nbsp;Programaci&oacute;n Dias</th>
+                                    <th width="15%" align="center"><input type="text" class="form-control" placeholder="Madrugada" disabled></th>
+                                    <th width="15%" align="center"><input type="text" class="form-control" placeholder="Ma&ntilde;ana" disabled></th>
+                                    <th width="15%" align="center"><input type="text" class="form-control" placeholder="Tarde" disabled></th>
+                                    <th width="15%" align="center"><input type="text" class="form-control" placeholder="Noche" disabled></th>
+
+                                    <!--<th width="10%" align="center"><input type="text" class="form-control" placeholder="Madrugada" disabled></th>-->
+                                </tr>
+                                <tr class="filters" id="marcar" style="display:none">
+                                    <td></td>
+                                    <td>&nbsp;<input id="MD" type="checkbox" value="1" onchange="seleccionGr(this,'MD')"></td>
+                                    <td>&nbsp;<input id="M" type="checkbox" value="1" onchange="seleccionGr(this,'M')"></td>
+                                    <td>&nbsp;<input id="T" type="checkbox" value="1" onchange="seleccionGr(this,'T')"></td>
+                                    <td>&nbsp;<input id="N" type="checkbox" value="1" onchange="seleccionGr(this,'N')"></td>
+                                    
+                                    <!--<th align="center"><input id="MD" type="checkbox" value="1" onchange="seleccionGr(this,'MD')"></th>-->
+                                </tr>
+                            </thead>
+                        </table>
+
+                        <div id="global">
+                            <table class="table">
+                                <thead>
+                                    <tr class="filters" style="display:none">
+                                        <th><input type="text" class="form-control" placeholder="Formulario" disabled></th>
+                                        <th><input type="text" class="form-control" placeholder="Nuevo" disabled></th>
+                                        <th><input type="text" class="form-control" placeholder="Modificar" disabled></th>
+                                        <th><input type="text" class="form-control" placeholder="Eliminar" disabled></th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+
+                                </tbody>
+                            </table>
+
+                        </div>
+
+                   <div style="margin-top:10px" class="form-group">
+                        <div class="col-sm-12 controls">
+                            <?php if ($permiso->crear == 1 || $permiso->modificar == 1): ?>
+                                <input type="submit" value="Guardar" class="btn btn-success">
+                            <?php endif; ?>
+                            <a href="/all_medicos_programacion" class="btn btn-danger">Cancelar</a>
+                        </div>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+@include('frontend.includes.footer')
+@endsection
+

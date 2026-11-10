@@ -1,0 +1,196 @@
+.panel-heading {
+  text-align: center;
+}
+
+.form-row {
+  display: grid;
+  grid-template-columns: 180px 10px 1fr;
+  align-items: center;
+  margin-bottom: 5px;
+}
+
+/* 🔹 Fila con dos columnas de datos (como la que tiene dos selects) */
+.form-row.double {
+  grid-template-columns: 180px 10px 1fr 180px 10px 1fr;
+}
+
+/* 🔹 Etiquetas y separadores */
+.label {
+  font-weight: bold;
+  color: #222;
+  white-space: nowrap;
+  text-align: left;
+}
+
+.colon {
+  text-align: right;
+  font-weight: bold;
+  padding-right: 4px;
+}
+
+/* 🔹 Valor o campo (input, select, texto) */
+.value {
+  text-align: left;
+  width: 100%;
+}
+
+label {
+  font-size: 11px;
+}
+
+.value-row {
+  font-size: 11px;
+}
+
+#faTableCirujano, 
+#faTableAnastesiologo, 
+#faTableEnfermeraIntru, 
+#faTableDiagnosticos, 
+#faTableProcedures {
+  margin-top: 10px;
+}
+
+#faTableCirujano th,
+#faTableCirujano td {
+  text-align: left !important;
+}
+
+#faTableAnastesiologo th,
+#faTableAnastesiologo td {
+  text-align: left !important;
+}
+
+#faTableEnfermeraIntru th,
+#faTableEnfermeraIntru td {
+  text-align: left !important;
+}
+
+#faTableDiagnosticos th,
+#faTableDiagnosticos td {
+  text-align: left !important;
+}
+
+#faTableProcedures th,
+#faTableProcedures td {
+  text-align: left !important;
+}
+
+.modal-footer {
+  display: flex;
+  justify-content: center;
+  gap: 15px;
+  padding: 20px 0px;
+  border-top: 1px solid #ddd;
+  background-color: #f9f9f9;
+}
+
+/* 🔹 Botones uniformes */
+.footer-btn {
+  width: 30%;
+  font-weight: 600;
+  text-align: center;
+}
+
+.table-error {
+  border: 1px solid #dc3545;
+  background-color: #fee2e2;
+}
+
+.label-help {
+  color: #dc3545; 
+  font-size: 11px; 
+  font-weight: bold
+}
+
+.swal2-icon.swal2-warning {
+  font-size: 15px !important; 
+}
+
+.select2-container--default.select2-container--disabled .select2-selection--single {
+  background-color: #e9ecef !important;
+  cursor: not-allowed !important;
+  opacity: 0.7 !important;
+}
+
+.select2-container--default.select2-container--disabled .select2-selection__rendered {
+  color: #6c757d;
+}
+
+select.form-control:disabled {
+    background-color: #e9ecef !important;
+    cursor: not-allowed !important;
+    opacity: 0.7 !important;
+}
+
+input.form-control:read-only {
+  background-color: #E3E3E3;
+  cursor: default;
+}
+
+textarea.form-control:read-only {
+  background-color: #E3E3E3;
+  cursor: default;
+}
+
+/* ERROR EN CAMPOS NORMALES */
+.input-error {
+  border: 1px solid #dc3545 !important;
+  box-shadow: 0 0 0 .125rem rgba(220,53,69,.25) !important;
+}
+
+/* Texto de ayuda */
+.label-help {
+  display: block;
+  font-size: 1rem;
+  color: #dc3545;
+  margin-top: 2px;
+}
+
+/* ERROR EN SELECT2 (single) */
+.select2-container--default .select2-selection--single.select2-error {
+  border: 1px solid #dc3545 !important;
+  box-shadow: 0 0 0 .125rem rgba(220,53,69,.25) !important;
+}
+
+/* WARNING EN CAMPOS NORMALES */
+.input-warn {
+  border: 1px solid #BA911C !important;
+  box-shadow: 0 0 0 .125rem rgba(255, 193, 7, .25) !important;
+}
+
+.label-warn {
+  display: block;
+  font-size: 1rem;
+  color: #BA911C;
+  margin-top: 2px;
+  font-weight: 900;
+}
+
+/* WARNING EN SELECT2 (single) */
+.select2-container--default .select2-selection--single.select2-warn {
+  border: 1px solid #BA911C !important;
+  box-shadow: 0 0 0 .125rem rgba(255, 193, 7, .25) !important;
+}
+
+/* 🔹 Responsivo: en pantallas pequeñas se apila todo ordenadamente */
+@media (max-width: 768px) {
+  .form-row {
+    grid-template-columns: 1fr;
+  }
+  .form-row.double {
+    grid-template-columns: 1fr;
+  }
+  .colon {
+    display: none;
+  }
+}
+
+@media (max-width: 768px) {
+  .modal-footer {
+    flex-direction: column;
+    align-items: center;
+  }
+  .footer-btn {
+    width: 80%;
+  }
+}

@@ -1,0 +1,58 @@
+label {
+  font-size: 11px;
+}
+
+.row {
+  gap: 10px;
+}
+
+.separate-addon {
+  background-color: #ffffff !important;
+  border: none !important;
+}
+
+.table-error {
+  border: 1px solid #dc3545;
+}
+
+.label-help {
+  color: #dc3545; 
+  font-size: 11px; 
+  font-weight: bold
+}
+
+.label-help-success {
+  color: #28a745; 
+  font-size: 11px; 
+  font-weight: bold
+}
+
+.label-antecedentes { 
+  color: #060606; 
+  font-size: 12px;
+  font-weight: bold
+}
+
+.antecedentes-content { 
+  color: #060606; 
+  font-size: 11px;
+  font-weight: 100
+}
+
+.disabled-tab a {
+  pointer-events: none;
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+#tableAtencionesCitas th,
+#tableAtencionesCitas td {
+  vertical-align: middle !important;
+  text-align: center !important;
+}
+
+#tableAtencionesEnfermeria th,
+#tableAtencionesEnfermeria td {
+  vertical-align: middle !important;
+  text-align: center !important;
+}

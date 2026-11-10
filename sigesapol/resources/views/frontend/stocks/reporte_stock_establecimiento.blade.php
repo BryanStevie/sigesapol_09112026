@@ -1,0 +1,270 @@
+@extends('frontend.layouts.master')
+@section('renderjs')
+<style>
+    .filterable {
+        margin-top: 0px;
+    }
+    .filterable .panel-heading .pull-right {
+        margin-top: -20px;
+    }
+    .filterable .filters input[disabled] {
+        background-color: transparent;
+        border: none;
+        cursor: auto;
+        box-shadow: none;
+        padding: 0;
+        height: auto;
+    }
+    .filterable .filters input[disabled]::-webkit-input-placeholder {
+        color: #333;
+    }
+    .filterable .filters input[disabled]::-moz-placeholder {
+        color: #333;
+    }
+    .filterable .filters input[disabled]:-ms-input-placeholder {
+        color: #333;
+    }
+    #global {
+        height: 600px !important;
+        width: auto;
+        border: 1px solid #ddd;
+        background: #f1f1f1;
+        overflow-y: scroll !important;
+    }
+    .margin{
+
+        margin-bottom: 20px;
+    }
+    .margin-buscar{
+        margin-bottom: 5px;
+        margin-top: 5px;
+    }
+
+    .panel{
+        margin-bottom:0px
+    }
+
+</style>
+
+<script>
+    $(document).ready(function () {
+        $("#id_establecimiento").select2({
+            width: 'resolve' // need to override the changed default
+        });
+        $("#id_consultorio").trigger('change');
+
+        $('.filterable .btn-filter').click(function () {
+            var $panel = $(this).parents('.filterable'),
+                    $filters = $panel.find('.filters input'),
+                    $tbody = $panel.find('.table tbody');
+            if ($filters.prop('disabled') == true) {
+                $filters.prop('disabled', false);
+                $filters.first().focus();
+            } else {
+                $filters.val('').prop('disabled', true);
+                $tbody.find('.no-result').remove();
+                $tbody.find('tr').show();
+            }
+        });
+
+        $('.filterable .filters input').keyup(function (e) {
+            /* Ignore tab key */
+            var code = e.keyCode || e.which;
+            if (code == '9')
+                return;
+            /* Useful DOM data and selectors */
+            var $input = $(this),
+                    inputContent = $input.val().toLowerCase(),
+                    $panel = $input.parents('.filterable'),
+                    column = $panel.find('.filters th').index($input.parents('th')),
+                    $table = $panel.find('.table'),
+                    $rows = $table.find('tbody tr');
+            /* Dirtiest filter function ever ;) */
+            var $filteredRows = $rows.filter(function () {
+                var value = $(this).find('td').eq(column).text().toLowerCase();
+                return value.indexOf(inputContent) === -1;
+            });
+            /* Clean previous no-result if exist */
+            $table.find('tbody .no-result').remove();
+            /* Show all rows, hide filtered ones (never do that outside of a demo ! xD) */
+            $rows.show();
+            $filteredRows.hide();
+            /* Prepend no-result row if all rows are filtered */
+            if ($filteredRows.length === $rows.length) {
+                $table.find('tbody').prepend($('<tr class="no-result text-center"><td colspan="' + $table.find('.filters th').length + '">No se encuentra el laboratorio</td></tr>'));
+            }
+        });
+    });
+    $(document).ready(function () {
+        $('#example').dataTable({
+            "language": {
+                "sProcessing": "Procesando...",
+                "sLengthMenu": "Mostrar _MENU_ registros",
+                "sZeroRecords": "No se encontraron resultados",
+                "sEmptyTable": "Ningún dato disponible en esta tabla",
+                "sInfo": "Mostrando registros del _START_ al _END_ de un total de _TOTAL_ registros",
+                "sInfoEmpty": "Mostrando registros del 0 al 0 de un total de 0 registros",
+                "sInfoFiltered": "(filtrado de un total de _MAX_ registros)",
+                "sInfoPostFix": "",
+                "sSearch": "Filtrar:",
+                "sUrl": "",
+                "sInfoThousands": ",",
+                "sLoadingRecords": "Cargando...",
+                "oPaginate": {
+                    "sFirst": "Primero",
+                    "sLast": "Último",
+                    "sNext": "Siguiente",
+                    "sPrevious": "Anterior"
+                },
+                "oAria": {
+                    "sSortAscending": ": Activar para ordenar la columna de manera ascendente",
+                    "sSortDescending": ": Activar para ordenar la columna de manera descendente"
+                }
+            }
+        });
+    });
+
+    function exportarExcel() {
+
+        var id_establecimiento = $('#id_establecimiento').val();
+        location.href = 'exportar_stockFarmaciaByEstablecimiento/' + id_establecimiento+'';
+    }
+    
+    
+</script>
+<style>
+</style>
+@endsection
+@section('content')
+
+        <div class="panel panel-primary filterable">
+            <div class="panel-heading">
+                <h3 class="panel-title" style="font-size: 13px !important">STOCK DE CENTRO DE ATENCIÓN POR ESTABLECIMIENTO</h3>
+            </div>
+            <div class="panel-body">
+                <div class="row col-sm-12">
+                    <form id="frmStock" class="form-horizontal" method="post" action="stockFarmaciaByEstablecimiento">
+                        <input type="hidden" name="_token" value="{{ csrf_token() }}">
+                        <div class="col-sm-5">
+                            <label><small>IPRESS</small></label>
+                            <select class="form-control" name="id_establecimiento" id="id_establecimiento" style="width: 100%">
+                                <option value="0">--Seleccionar--</option>
+                                <?php
+                                foreach ($establecimientos as $d) {
+                                    echo '<option value="' . $d->id . '"';
+                                    if (isset($id_establecimiento)) {
+                                        if ($id_establecimiento == $d->id)
+                                            echo " selected";
+                                    }
+                                    echo '>' . $d->codigo . " " . $d->nombre . '</option>';
+                                }
+                                ?>
+                            </select>
+                        </div>
+                        <div class="col-sm-2">
+                            <br/>
+                            <input class="btn btn-info form-control" value="Buscar" type="submit">
+                        </div>
+                        <div class="col-sm-3 col-md-2">
+                            <br/>
+                            <a class="btn btn-success form-control" href="javascript:void(0)" onclick="exportarExcel()" >
+                                <i class="fa fa-file-excel-o" aria-hidden="true"></i> Exportar Reporte
+                            </a>
+                        </div>
+                    </form>
+                </div>
+                <div class="row">
+                    <div class="responsive">
+                    <div class="col-sm-12">
+                        <br/>
+                        <table id="example" class="table table-hover" style="font-size: 12px !important;">
+                            <thead>
+                                <tr class="filters">
+                                    <th>Código</th>
+                                    <th>Producto Farmacéutico o Dispositivo Médico</th>
+                                    <th>Unidad</th>
+                                    <?php
+                                    $ff = App\Models\Farmacia::GetFarmaciaByIdEstablecimiento($id_establecimiento);
+                                    if (isset($ff)) {
+                                        foreach ($ff as $f1) {
+
+                                            if($f1->id!=1 and $f1->id!=2 and $f1->id!=4 and  $f1->id!=11 and $f1->id!=12 and $f1->id!=13 and  $f1->id!=15  and  $f1->id!=20 and $f1->id!=24 and  $f1->id!=27 and $f1->id!=30 and $f1->id!=35 and $f1->id!=45 and $f1->id!=46 and $f1->id!=47 and $f1->id!=52 and $f1->id!=122){
+                                            ?>
+                                            <th><?php $name=explode("del",$f1->nombre); echo $name[0]; ?></th>
+                                            <?php
+                                            }
+                                        }
+                                    }
+                                    //print_r($ff);
+                                    ?>
+                                    <th>Total</th>
+                                </tr>
+                            </thead>
+                            <tbody style="font-size: 11px !important;">
+                                <?php
+                                if (isset($productos)) {
+                                    
+                                    $a=1;
+                                    foreach ($productos as $p) {
+                                        $a ++
+                                        ?>
+                                        <tr>
+                                            <td><?php echo $p->codigo_producto ?></td>
+                                            <td><?php echo $p->nombre_producto ?></td>
+                                            <td class="text-center"><?php echo $p->unidad ?></td>
+                                            <?php
+                                            $total = $p->stock_actual;
+                                            $total = str_replace('{', '', $total);
+                                            $total = str_replace('}', '', $total);
+                                            $arr = explode(',',$total);
+                                            $cant = count($arr);
+                                            $total_fila=0;
+                                            if (isset($ff)) {
+                                                foreach ($ff as $f1) {
+                                                    if($f1->id!=1 and $f1->id!=2 and $f1->id!=4 and  $f1->id!=11 and $f1->id!=12 and $f1->id!=13 and  $f1->id!=15 and  $f1->id!=20 and $f1->id!=24 and  $f1->id!=27 and $f1->id!=30 and $f1->id!=35 and $f1->id!=45 and $f1->id!=46 and $f1->id!=47 and $f1->id!=52 and $f1->id!=122){
+                                                    $stock = "";
+                                                    ?>
+                                                    <td class="text-center">
+                                                        <?php 
+                                                        for ($i = 0; $i <= $cant; $i++) {
+                                                            if(isset($arr[$i])){
+                                                                $arrF = explode('-',$arr[$i]);
+                                                                if($arrF[0] == $f1->id){
+                                                                    $stock = $arrF[1];
+                                                                    if($p->codigo_producto=='PF00718' || $p->codigo_producto=='PF00718' || $p->codigo_producto=='PF01047' || $p->codigo_producto=='PF01007' || $p->codigo_producto=='PF01008'):
+                                                                        $stock = $stock/1000;
+                                                                    endif;
+                                                                    $total_fila=$total_fila+$stock;
+                                                                }
+                                                            }
+                                                        }
+                                                        if ($stock <> ""){
+                                                            
+                                                            echo $stock;
+                                                        } else {
+                                                            echo 0;
+                                                        }
+                                                        ?>
+                                                    </td>
+                                                    <?php
+                                                    }
+                                                }?>
+                                                <td><?php echo $total_fila ?></td>
+                                           <?php }
+                                            ?>
+
+                                        </tr>
+                                        <?php
+                                    }
+                                }
+                                ?>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+		</div>
+    </div>
+
+@include('frontend.includes.footer')
+@endsection

@@ -1,0 +1,185 @@
+@extends('frontend.layouts.master')
+@section('renderjs')
+<script>
+        
+    $(document).ready(function () {
+        $cmbEst = $("#frmfarmacia").find("#id_establecimiento");
+        $cmbEst.select2();
+        $cmbNom = $("#frmfarmacia").find("#nombre");
+        $cmbNom.select2();
+        $cmbEst.change(function () {
+            $this = $(this);
+            cmbEst = $cmbEst.val();
+            option = {
+                url: '/cargarnombre/' + cmbEst,
+                type: 'GET',
+                dataType: 'json',
+                data: {}
+            };
+            $.ajax(option).done(function (data) {
+                cargarComboNombre($cmbNom, data);
+                $cmbNom.val(null).trigger("change");
+                document.getElementById("nombre").disabled = false;
+            });
+        });
+    });
+    function cargarComboNombre($select, data) {
+        $select.html('');
+        $(data).each(function (ii, oo) {
+            $select.append('<option value="" required="required" >' + "Selecciona el nombre de la Farmacia"+ '</option>')
+            $select.append('<option value="' + "Farmacia del "+ oo.nombre + '">' + "Farmacia del "+ oo.nombre + '</option>')
+        });
+    }
+</script>
+@endsection
+@section('content')
+<div class="container">
+    <div class="row">
+        <div class="col-md-3">
+            <ul class="nav nav-pills nav-stacked">
+                <li><a href="/all_farmacias"><i class="fa fa-table fa-fw"></i> Centros de Atención </a></li>
+                <li class="active"><a href="/create_farmacia"><i class="fa fa-plus"></i> Nuevo</a></li>
+            </ul>
+        </div>
+        <div class="col-md-9 well">
+            <div class="panel panel-primary" >
+                <div class="panel-heading">
+                    <div class="panel-title">Editar la {{$farmacias->nombre}}</div>                    
+                </div>     
+                <div style="padding-top:30px" class="panel-body" >
+                    <div style="display:none" id="login-alert" class="alert alert-danger col-sm-12"></div>
+                    <form id="frmfarmacia" class="form-horizontal" role="form" method="post"  action="{{ route('update_farmacia_config') }}">
+                        <input type="hidden" name="_token" value="{{ csrf_token() }}">
+						<input value="<?php echo $farmacias->id?>" type="hidden" name="id">
+						
+						<div class="form-group">
+							<label class="col-lg-4 control-label">Centro de Atenci&oacute;n</label>
+							<label class="col-lg-8 control-label" style="text-align:left"><?php echo $farmacias->nombre?></label>
+						</div>
+						<div class="form-group">
+							<label class="col-lg-4 control-label">Rango de d&iacute;as para registrar una receta atrazada</label>
+							<div class="col-lg-2">
+								<input type="text" value="<?php echo $farmacias->rango_registro?>" name="rango_registro" required="" class="form-control" placeholder="Rango de Registro Receta" onkeypress="return IsNumber(event)" maxlength="3">
+							</div>
+
+							<label class="col-lg-4 control-label">Rango de d&iacute;as para anular una receta registrada</label>
+							<div class="col-lg-2">
+								<input type="text" value="<?php echo $farmacias->rango_anulado?>" name="rango_anulado" required="" class="form-control" placeholder="Rango para Anular Receta" onkeypress="return IsNumber(event)" maxlength="3">
+							</div>
+						</div>
+						
+						
+						<div class="form-group">
+							<label class="col-lg-4 control-label">Modo de Registro de Receta</label>
+							<div class="col-lg-3">
+								<select class="form-control" name="modo_validacion" id="modo_validacion">
+									<option value="1" <?php if($farmacias->modo_validacion == 1)echo "selected='selected'";?>>Por Nro. de Documento</option>
+									<option value="2" <?php if($farmacias->modo_validacion == 2)echo "selected='selected'";?>>Por RUA</option>
+									<option value="3" <?php if($farmacias->modo_validacion == 3)echo "selected='selected'";?>>Por  Nro. de Documento Y Admisi&oacute;n</option>
+								</select>
+							</div>
+						</div>
+						
+						<div class="form-group">
+							<label class="col-lg-4 control-label">Alerta de Validaci&oacute;n en receta de los Dias de duracion de producto por Beneficiario y Farmacia</label>
+							<div class="col-lg-2">
+								<input type="checkbox" style="margin-top:28px" value="1" name="flag_receta_dias" <?php if($farmacias->flag_receta_dias == 1)echo 'checked="checked"';?> />
+							</div>
+						</div>
+						
+						<div class="form-group">
+							<label class="col-lg-4 control-label">Tipo de Receta</label>
+							<div class="col-lg-3">
+								<select class="form-control" id="id_tiporeceta" name="id_tiporeceta" tabindex="5" style="width: 100%">
+									<option value="" selected>-Seleccionar-</option>
+									<option value="1" <?php if($farmacias->id_tiporeceta == 1)echo "selected='selected'";?>>AMBULATORIO</option>
+									<option value="2" <?php if($farmacias->id_tiporeceta == 2)echo "selected='selected'";?>>EMERGENCIA</option>
+									<option value="3" <?php if($farmacias->id_tiporeceta == 3)echo "selected='selected'";?>>HOSPITALIZACION</option>
+									<option value="4" <?php if($farmacias->id_tiporeceta == 4)echo "selected='selected'";?>>CENTRO QUIRÚRGICO</option>
+									<option value="5" <?php if($farmacias->id_tiporeceta == 5)echo "selected='selected'";?>>SERVICIO NUTRICIONAL</option>
+								</select>
+							</div>
+							<label class="col-lg-3 control-label">Nro Atenciones</label>
+							<div class="col-lg-2">
+								<select class="form-control" id="id_nroatenciones" name="id_nroatenciones" tabindex="6" style="width: 100%">
+									<option value="" selected>-Seleccionar-</option>
+									<option value="3" <?php if($farmacias->nro_atenciones == 3)echo "selected='selected'";?>>3</option>
+									<option value="5" <?php if($farmacias->nro_atenciones == 5)echo "selected='selected'";?>>5</option>
+									<option value="-1" <?php if($farmacias->nro_atenciones == -1)echo "selected='selected'";?>>Ilimitado</option>
+								</select>
+							</div>
+
+						</div>
+						<div class="form-group">
+							<label class="col-lg-4 control-label">Tipo de Receta</label>
+							<div class="col-lg-3">
+								<select class="form-control" id="id_tiporeceta2" name="id_tiporeceta2" tabindex="5" style="width: 100%">
+									<option value="" selected>-Seleccionar-</option>
+									<option value="1" <?php if($farmacias->id_tiporeceta2 == 1)echo "selected='selected'";?>>AMBULATORIO</option>
+									<option value="2" <?php if($farmacias->id_tiporeceta2 == 2)echo "selected='selected'";?>>EMERGENCIA</option>
+									<option value="3" <?php if($farmacias->id_tiporeceta2 == 3)echo "selected='selected'";?>>HOSPITALIZACION</option>
+									<option value="4" <?php if($farmacias->id_tiporeceta2 == 4)echo "selected='selected'";?>>CENTRO QUIRÚRGICO</option>
+									<option value="5" <?php if($farmacias->id_tiporeceta2 == 5)echo "selected='selected'";?>>SERVICIO NUTRICIONAL</option>
+								</select>
+							</div>
+							<label class="col-lg-3 control-label">Nro Atenciones</label>
+							<div class="col-lg-2">
+								<select class="form-control" id="id_nroatenciones2" name="id_nroatenciones2" tabindex="6" style="width: 100%">
+									<option value="" selected>-Seleccionar-</option>
+									<option value="3" <?php if($farmacias->nro_atenciones2 == 3)echo "selected='selected'";?>>3</option>
+									<option value="5" <?php if($farmacias->nro_atenciones2 == 5)echo "selected='selected'";?>>5</option>
+									<option value="-1" <?php if($farmacias->nro_atenciones2 == -1)echo "selected='selected'";?>>Ilimitado</option>
+								</select>
+							</div>
+
+						</div>
+						<div class="form-group">
+							<label class="col-lg-4 control-label">Tipo de Receta</label>
+							<div class="col-lg-3">
+								<select class="form-control" id="id_tiporeceta3" name="id_tiporeceta3" tabindex="7" style="width: 100%">
+									<option value="" selected>-Seleccionar-</option>
+									<option value="1" <?php if($farmacias->id_tiporeceta3 == 1)echo "selected='selected'";?>>AMBULATORIO</option>
+									<option value="2" <?php if($farmacias->id_tiporeceta3 == 2)echo "selected='selected'";?>>EMERGENCIA</option>
+									<option value="3" <?php if($farmacias->id_tiporeceta3 == 3)echo "selected='selected'";?>>HOSPITALIZACION</option>
+									<option value="4" <?php if($farmacias->id_tiporeceta3 == 4)echo "selected='selected'";?>>CENTRO QUIRÚRGICO</option>
+									<option value="5" <?php if($farmacias->id_tiporeceta3 == 5)echo "selected='selected'";?>>SERVICIO NUTRICIONAL</option>
+								</select>
+							</div>
+							<label class="col-lg-3 control-label">Nro Atenciones</label>
+							<div class="col-lg-2">
+								<select class="form-control" id="id_nroatenciones3" name="id_nroatenciones3" tabindex="6" style="width: 100%">
+									<option value="" selected>-Seleccionar-</option>
+									<option value="3" <?php if($farmacias->nro_atenciones3 == 3)echo "selected='selected'";?>>3</option>
+									<option value="5" <?php if($farmacias->nro_atenciones3 == 5)echo "selected='selected'";?>>5</option>
+									<option value="-1" <?php if($farmacias->nro_atenciones3  == -1)echo "selected='selected'";?>>Ilimitado</option>
+								</select>
+							</div>
+						</div>
+
+						
+						
+						<div class="form-group">
+							<label class="col-lg-4 control-label">Ingreso de pecosa</label>
+							<div class="col-lg-3">
+								<select class="form-control" id="flag_pecosa" name="flag_pecosa" tabindex="6" style="width: 100%">
+									<option value="" selected>-Seleccionar-</option>
+									<option  value="1" <?php if($farmacias->flag_pecosa == 1)echo "selected='selected'";?>>MANUAL</option>
+									<option value="2" <?php if($farmacias->flag_pecosa == 2)echo "selected='selected'";?>>AUTOMATICO</option>
+								</select>
+							</div>
+						</div>
+						
+                        <div style="margin-top:10px" class="form-group">
+                            <div class="col-sm-12 controls">
+                                <input type="submit" value="Guardar" class="btn btn-success">
+                                <a href="/all_farmacias" class="btn btn-danger">Cancelar</a>
+                            </div>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+@include('frontend.includes.footer')
+@endsection
